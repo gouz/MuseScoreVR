@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>musicVR</title>
+<style>
+  body { margin: 0; font: 18px system-ui, sans-serif; background: #111; color: #ddd; padding: 24px; }
+  small { color: #888; }
+</style>
+</head>
+<body>
+<h1>musicVR</h1>
+<p><input id="file" type="file" accept=".zip,application/zip"></p>
+<p id="status">Ouvrez un projet préparé dans le configurateur.</p>
+<small>Dans le casque : gâchette sur un musicien = écouter depuis sa place · gâchette sur le podium = chef · poignée = lecture / pause.</small>
+<script type="importmap">{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }</script>
+<script type="module">
+// Headset player: renders a project prepared in config.html; nothing about the orchestra is edited here.
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { S, ctx, play, pause, meter, sitAt, setHead, placeAll, facing, seatName, openProject, projectFromUrl } from './engine.js';
+const status = document.getElementById('status'), file = document.getElementById('file');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.xr.enabled = true;
+renderer.domElement.style.display = 'none'; document.body.append(renderer.domElement); // only used inside the XR session
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x101014);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x333344, 2.5), new THREE.GridHelper(40, 40, 0x444444, 0x222222));
+const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 100);
+const rig = new THREE.Group(); rig.add(camera); scene.add(rig);
+const band = new THREE.Group(); scene.add(band);
+const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.15, 24), new THREE.MeshStandardMaterial({ color: 0x888888 }));
+podium.position.y = 0.075; scene.add(podium);
+const cube = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+
+function label(text) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 48;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.font = '28px system-ui'; x.textAlign = 'center'; x.fillText(text, 128, 34);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+  sp.scale.set(1, 0.19, 1); return sp;
+}
+function build3d() {
+  band.children.forEach(o => o.traverse(m => { m.material?.map?.dispose(); m.material?.dispose(); }));
+  band.clear();
+  S.parts.forEach(p => {
+    for (const s of S.seats.filter(s => s.part === p)) {
+      const color = new THREE.Color().setHSL(p.hue / 360, 0.6, 0.45);
+      const m = new THREE.Mesh(cube, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0 }));
+      m.position.set(s.x, 0.75, s.y); m.userData.seat = s;
+      const l = label(seatName(s)); l.position.y = 0.45; m.add(l);
+      band.add(m);
+    }
+  });
+}
+function teleport(seat) {
+  sitAt(seat);
+  const [fx, fz] = facing(seat);
+  rig.position.set(seat ? seat.x : 0, 0, seat ? seat.y : 0);
+  rig.rotation.y = Math.atan2(-fx, -fz); // rotate the rig's -z onto the facing direction
+  for (const m of band.children) m.visible = m.userData.seat !== seat; // don't sit inside your own cube
+}
+
+// controllers: trigger on a cube = sit there, trigger on the podium = conductor, grip = play/pause
+const ray = new THREE.Raycaster(), tmp = new THREE.Matrix4();
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -5)]), new THREE.LineBasicMaterial({ color: 0xffffff })));
+  c.addEventListener('select', () => {
+    tmp.identity().extractRotation(c.matrixWorld);
+    ray.ray.origin.setFromMatrixPosition(c.matrixWorld); ray.ray.direction.set(0, 0, -1).applyMatrix4(tmp);
+    const hit = ray.intersectObjects([...band.children, podium], false)[0];
+    if (hit) teleport(hit.object === podium ? null : hit.object.userData.seat);
+  });
+  c.addEventListener('squeeze', () => S.playing ? pause() : play());
+  rig.add(c);
+}
+
+const head = new THREE.Vector3(), fwd = new THREE.Vector3(), up = new THREE.Vector3(), q = new THREE.Quaternion();
+renderer.setAnimationLoop(() => {
+  if (!renderer.xr.isPresenting) return;
+  const cam = renderer.xr.getCamera(); // head pose drives the ears
+  cam.getWorldPosition(head); cam.getWorldDirection(fwd); up.set(0, 1, 0).applyQuaternion(cam.getWorldQuaternion(q));
+  setHead(head.x, head.y, head.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z);
+  meter();
+  for (const m of band.children) { const lv = m.userData.seat.part.level || 0; m.material.emissiveIntensity = 1.5 * lv; m.scale.setScalar(1 + 0.2 * lv); }
+  renderer.render(scene, camera);
+});
+renderer.xr.addEventListener('sessionstart', () => { ctx.resume(); S.headTracked = true; teleport(S.listener); });
+renderer.xr.addEventListener('sessionend', () => { S.headTracked = false; pause(); placeAll(); });
+
+async function open(blob) {
+  status.textContent = 'Ouverture…';
+  const project = await openProject(blob);
+  document.title = project.title + ' – musicVR';
+  build3d(); teleport(null);
+  status.textContent = `${project.title} · ${S.seats.length} musiciens — prêt, entrez en VR.`;
+  if (!document.getElementById('VRButton')) document.body.append(VRButton.createButton(renderer));
+}
+const fail = e => status.textContent = 'Erreur : ' + (e.message || e);
+file.onchange = () => file.files[0] && open(file.files[0]).catch(fail);
+projectFromUrl().then(b => b && open(b)).catch(fail);
+</script>
+</body>
+</html>

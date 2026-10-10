@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>musicVR – configurateur</title>
+<style>
+  body { margin: 0; font: 14px system-ui, sans-serif; background: #111; color: #ddd; display: flex; height: 100vh; }
+  #side { flex: none; width: 320px; padding: 12px; overflow-y: auto; border-right: 1px solid #333; }
+  canvas { flex: 1; min-width: 0; height: 100%; cursor: pointer; } /* min-width: its own width attribute must not grow the flex item */
+  fieldset { border: 1px solid #333; margin: 0 0 12px; }
+  label { display: block; margin: 4px 0; }
+  .part { display: flex; justify-content: space-between; align-items: center; }
+  .part input { width: 3em; }
+  .fam { margin: 10px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; border-left: 4px solid; padding-left: 6px; }
+  button { margin: 2px 4px 2px 0; }
+  #pos { width: 100%; }
+  small { color: #888; }
+</style>
+</head>
+<body>
+<div id="side">
+  <fieldset><legend>Projet</legend>
+    <input id="file" type="file" accept=".zip,application/zip">
+    <button id="save" disabled>Enregistrer le projet</button>
+  </fieldset>
+  <p id="status">Ouvrez un projet (.zip créé par tools/stems.py).</p>
+  <fieldset><legend>Écoute</legend>
+    <button id="play" disabled>▶︎ Lecture</button><button id="stop">■ Stop</button>
+    <input id="pos" type="range" min="0" max="1" step="0.001" value="0">
+    <small id="time">0:00</small>
+  </fieldset>
+  <fieldset><legend>Rendu sonore</legend>
+    <label><input type="radio" name="mode" value="raw"> copies identiques</label>
+    <label><input type="radio" name="mode" value="decor" checked> copies décorrélées (retard, micro-désaccord, gain)</label>
+    <label><input id="dir" type="checkbox" checked> rayonnement des instruments (pavillons orientés)</label>
+    <label>Réverbération <input id="rev" type="range" min="0" max="1" step="0.01" value="0.35"></label>
+  </fieldset>
+  <fieldset><legend>Musiciens par partie</legend><div id="parts"></div></fieldset>
+  <small>Glisser un cube = le déplacer · clic sur un cube = écouter depuis sa place · clic sur ◆ = chef.<br>
+    L'écoute ici sert à vérifier la configuration ; enregistrez puis ouvrez le projet dans le casque.</small>
+</div>
+<canvas id="c"></canvas>
+<script type="module">
+import { S, play, pause, stop, seek, restart, now, meter, setReverb, sitAt, placeAll, layout, seatName, openProject, saveProject, projectFromUrl } from './engine.js';
+const $ = id => document.getElementById(id);
+const [status, playBtn, stopBtn, pos, time, rev, partsEl, file, save] = ['status', 'play', 'stop', 'pos', 'time', 'rev', 'parts', 'file', 'save'].map($);
+let PX = 40; // pixels per metre, refitted to the band on each draw except while dragging
+
+// --- plan ----------------------------------------------------------------
+const cv = $('c'), g2 = cv.getContext('2d');
+const toPx = (x, y) => [cv.width / 2 + x * PX, cv.height * 0.75 + y * PX];
+const toM = (px, py) => [(px - cv.width / 2) / PX, (py - cv.height * 0.75) / PX];
+function draw() {
+  cv.width = cv.clientWidth; cv.height = cv.clientHeight;
+  if (!drag && S.seats.length) { // conductor sits at 3/4 height, band in front
+    const w = Math.max(...S.seats.map(s => Math.abs(s.x))) + 1.5, h = Math.max(...S.seats.map(s => -s.y)) + 1;
+    PX = Math.min(cv.width / 2 / w, cv.height * 0.75 / h, 120);
+  }
+  g2.clearRect(0, 0, cv.width, cv.height);
+  for (const s of S.seats) {
+    const [px, py] = toPx(s.x, s.y);
+    const lv = s.part.level || 0, r = 9 + 3 * lv;
+    g2.fillStyle = `hsl(${s.part.hue} 60% ${s === S.listener ? 75 : 30 + 40 * lv}%)`;
+    g2.fillRect(px - r, py - r, 2 * r, 2 * r);
+    if (s === S.listener) { g2.strokeStyle = '#fff'; g2.lineWidth = 2; g2.strokeRect(px - 12, py - 12, 24, 24); }
+    g2.fillStyle = '#aaa'; g2.font = '10px system-ui'; g2.textAlign = 'center';
+    g2.fillText(seatName(s), px, py + 20);
+  }
+  const [cx, cy] = toPx(0, 0);
+  g2.fillStyle = S.listener ? '#888' : '#fff';
+  g2.beginPath(); g2.moveTo(cx, cy - 10); g2.lineTo(cx + 10, cy); g2.lineTo(cx, cy + 10); g2.lineTo(cx - 10, cy); g2.fill();
+  g2.fillText('chef', cx, cy + 24);
+}
+let drag = null, dragged = false;
+cv.onpointerdown = e => {
+  const [mx, my] = toM(e.offsetX, e.offsetY);
+  drag = S.seats.find(s => Math.hypot(s.x - mx, s.y - my) < 0.4) || (Math.hypot(mx, my) < 0.4 ? 'chef' : null);
+  dragged = false;
+};
+cv.onpointermove = e => {
+  if (!drag || drag === 'chef' || !(e.buttons & 1)) return;
+  [drag.x, drag.y] = toM(e.offsetX, e.offsetY); drag.moved = dragged = true; placeAll(); draw();
+};
+cv.onpointerup = () => {
+  if (drag && !dragged) { sitAt(drag === 'chef' ? null : drag); draw(); }
+  drag = null;
+};
+onresize = draw;
+requestAnimationFrame(function tick() { // cubes follow the music
+  requestAnimationFrame(tick);
+  if (S.parts.some(p => p.an || p.level > 0.01)) { meter(); draw(); }
+});
+
+// --- controls ------------------------------------------------------------
+playBtn.onclick = () => S.playing ? pause() : play();
+stopBtn.onclick = stop;
+pos.oninput = () => seek(pos.value * S.duration);
+document.querySelectorAll('[name=mode]').forEach(r => r.onchange = () => { S.sections = r.value; restart(); });
+rev.oninput = () => setReverb(+rev.value);
+$('dir').onchange = e => { S.directivity = e.target.checked; placeAll(); };
+const clock = t => `${t / 60 | 0}:${String(t % 60 | 0).padStart(2, '0')}`;
+setInterval(() => {
+  const t = Math.min(now(), S.duration);
+  playBtn.textContent = S.playing ? '❚❚ Pause' : '▶︎ Lecture';
+  if (document.activeElement !== pos) pos.value = S.duration ? t / S.duration : 0;
+  time.textContent = `${clock(t)} / ${clock(S.duration)}`;
+}, 250);
+
+// --- project -------------------------------------------------------------
+async function open(blob) {
+  playBtn.disabled = save.disabled = true; status.textContent = 'Ouverture…';
+  const project = await openProject(blob);
+  document.title = project.title + ' – configurateur musicVR';
+  document.querySelector(`[name=mode][value=${S.sections}]`).checked = true;
+  rev.value = S.reverb; $('dir').checked = S.directivity;
+  // grouped by family, families in the score's order (same order as the seats)
+  let fam;
+  partsEl.replaceChildren(...[...S.parts].sort((a, b) => (a.familyRank ?? 0) - (b.familyRank ?? 0)).flatMap(p => {
+    const els = [];
+    if (p.family !== fam) {
+      fam = p.family;
+      const h = document.createElement('div'); h.className = 'fam'; h.textContent = p.familyName ?? p.family ?? '';
+      h.style.borderColor = h.style.color = `hsl(${p.hue} 60% 60%)`; els.push(h);
+    }
+    const row = document.createElement('label'); row.className = 'part';
+    const name = document.createElement('span'); name.textContent = p.name; // project files come from anyone: no innerHTML
+    const n = document.createElement('input'); Object.assign(n, { type: 'number', min: 0, max: 8, value: p.count });
+    n.oninput = () => { p.count = +n.value; layout(); restart(); draw(); };
+    row.append(name, n); return [...els, row];
+  }));
+  draw();
+  status.textContent = `${project.title} · ${S.parts.length} parties`; playBtn.disabled = save.disabled = false;
+}
+save.onclick = async () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await saveProject()); a.download = (S.project.title || 'projet') + '.zip'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+};
+const fail = e => status.textContent = 'Erreur : ' + (e.message || e);
+file.onchange = () => file.files[0] && open(file.files[0]).catch(fail);
+projectFromUrl().then(b => b && open(b)).catch(fail);
+</script>
+</body>
+</html>

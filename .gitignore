@@ -1,0 +1,7 @@
+# local HTTPS certificate (see README)
+.cert/
+# projects contain audio rendered with MuseSounds: never publish them
+proto/projects/
+*.zip
+__pycache__/
+.DS_Store
