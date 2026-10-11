@@ -5,6 +5,10 @@ Listen to a MuseScore score from inside the orchestra, in virtual reality.
 Pick a piece (`.mscz`), seat the musicians on a plan, and hear the orchestra in spatial audio in the headset:
 from the conductor's podium, or from any musician's chair.
 
+![The headset view from the conductor's podium: the orchestra in a symphonic seating, the full score open on the stand with the notes being played lit](docs/headset.png)
+
+<sub>Beethoven's Ode to Joy (public domain), symphonic seating, seen from the podium.</sub>
+
 - **Sound**: the real MuseSounds, rendered by MuseScore, one track per part, spatialized (HRTF) with
   instrument radiation, decorrelated sections and room reverb.
 - **MuseScore plugin**: seating presets, number of musicians per part, drag-and-drop placement, sound settings,
