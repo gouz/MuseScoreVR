@@ -4,7 +4,7 @@
 // The plugin talks to it over HTTP on this PC only (see tools/serve.js).
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
+import QtQuick.Dialogs as Dialogs
 import MuseScore 3.0
 import "layout.mjs" as Layout
 
@@ -15,8 +15,8 @@ MuseScore {
     version: "0.1"
     pluginType: "dialog"
     requiresScore: true
-    width: 1100
-    height: 720
+    width: 960
+    height: 660
 
     readonly property string server: "http://127.0.0.1:8480"
     readonly property color bg: "#111317"
@@ -26,7 +26,6 @@ MuseScore {
     readonly property color dim: "#8b909c"
     readonly property color accent: "#4f8cff"
 
-    property var proc: null          // the server process; kept here, or it would be collected (and killed)
     property int startTries: 0
     property var status: ({})        // last /api/status
     property var project: null       // project.json of the open project
@@ -34,16 +33,17 @@ MuseScore {
     property var seats: []           // { part, copy, x, y, moved }
     property int rev: 0              // bumped to refresh what depends on parts/seats
     property string sections: "decor"
+    property string preset: "auto"   // seating preset (layout.mjs PRESETS)
     property real reverb: 0.35
     property bool directivity: true
     property string message: ""
     property bool busy: true
     property bool requested: false   // our render request was accepted: the server's project is now this score's
 
-    FileIO { id: io }
+    QProcess { id: proc }            // the server; stops when the plugin window closes
 
     // --- server --------------------------------------------------------------
-    function api(method, path, body, done) {
+    function request(method, path, body, done) {
         var x = new XMLHttpRequest();
         x.onreadystatechange = function () { if (x.readyState === XMLHttpRequest.DONE && done) done(x.status, x.responseText) };
         x.open(method, server + path);
@@ -56,11 +56,10 @@ MuseScore {
     function startServer() {
         var dir = localPath(Qt.resolvedUrl(".")).replace(/\/$/, "");
         var exe = dir + "/bin/" + ({ osx: "musescorevr-macos", windows: "musescorevr-windows.exe" }[Qt.platform.os] || "musescorevr-linux");
-        proc = newQProcess();
         proc.startWithArgs(exe, ["--web", dir + "/web", "--data", dir + "/data", "--mscore", Qt.application.arguments[0]]);
     }
     function poll() {
-        api("GET", "/api/status", undefined, function (code, text) {
+        request("GET", "/api/status", undefined, function (code, text) {
             if (code !== 200) { // not running yet: start it once, then wait for it
                 if (startTries++ === 0) { message = "Démarrage de MuseScoreVR…"; startServer(); }
                 else if (startTries > 20) { message = "Impossible de démarrer le serveur MuseScoreVR (dossier bin/ du plugin)."; busy = false; poller.stop(); }
@@ -69,27 +68,29 @@ MuseScore {
             var first = !status.urls;
             status = JSON.parse(text);
             if (first) exportScore();
-            if (status.job) { busy = true; message = status.job.error ? status.job.error : status.job.title + " — " + status.job.msg; if (status.job.error) busy = false; }
+            if (status.job) { busy = !status.job.error; message = status.job.error || "Préparation de " + status.job.title; }
             else if (requested && status.project && (!project || project.source !== status.project.source)) openProject(status.project);
         });
     }
     Timer { id: poller; interval: 700; repeat: true; running: true; triggeredOnStart: true; onTriggered: root.poll() }
 
-    // the server reads the score from a file: export the open one (MuseScore keeps its audio settings in it)
+    // the server reads the score's saved file (a plugin can't save a .mscz in MuseScore 4): it finds it by name in MuseScore's recent files
     function exportScore() {
-        var name = (curScore.title || curScore.scoreName || "partition");
-        var base = io.tempPath() + "/musescorevr-" + name.replace(/[^\w\- ]+/g, "_");
-        if (!writeScore(curScore, base, "mscz")) { message = "Impossible d'exporter la partition."; busy = false; return; }
-        io.source = base + ".mscz";
-        render(io.exists() ? base + ".mscz" : base, name);
+        var name = curScore.title || curScore.scoreName || "partition";
+        try { cmd("file-save") } catch (e) { console.warn(e) } // the file on disk = the score as it is now (asks where, if never saved)
+        busy = true; requested = false; project = null; message = "Préparation de " + name + "…";
+        request("POST", "/api/render", { names: [curScore.scoreName, curScore.title], title: name }, function (code, text) {
+            if (code === 200) requested = true;
+            else { message = code === 400 ? "Enregistre la partition (⌘S / Ctrl+S), puis rouvre MuseScoreVR — ou choisis le fichier :" : text; busy = false; }
+        });
     }
     function render(path, name) {
         busy = true; requested = false; project = null; message = "Préparation de " + name + "…";
-        api("POST", "/api/render", { path: path, title: name }, function (code, text) {
+        request("POST", "/api/render", { path: path, title: name }, function (code, text) {
             if (code === 200) requested = true; else { message = text; busy = false; }
         });
     }
-    FileDialog {
+    Dialogs.FileDialog {
         id: pick
         title: "Partition enregistrée avec MuseScore 4"
         nameFilters: ["Partitions MuseScore (*.mscz)"]
@@ -100,6 +101,7 @@ MuseScore {
     function key(s) { return s.part.id + ":" + s.copy }
     function openProject(p) {
         project = p; busy = false; message = "";
+        preset = Layout.PRESETS[p.preset] ? p.preset : "auto";
         sections = p.sections === "raw" ? "raw" : "decor"; reverb = p.reverb !== undefined ? p.reverb : 0.35; directivity = p.directivity !== false;
         var list = p.parts.slice().sort(function (a, b) { return (a.familyRank || 0) - (b.familyRank || 0) });
         var fams = [];
@@ -114,28 +116,47 @@ MuseScore {
     }
     function layout() { // chairs the user moved keep their place
         var prev = {}; seats.forEach(function (s) { prev[key(s)] = s });
-        var list = Layout.arrange(parts);
+        var list = Layout.arrange(parts, preset);
         list.forEach(function (s) { var o = prev[key(s)]; if (o && o.moved) { s.x = o.x; s.y = o.y; s.moved = true } });
         seats = list; rev++;
     }
+    function setPreset(id) { preset = id; seats.forEach(function (s) { s.moved = false }); layout() }
     function setCount(p, n) { p.count = Math.max(0, Math.min(8, n)); layout() }
     function seatName(s) { return s.part.name + (s.part.count > 1 ? " #" + (s.copy + 1) : "") }
 
     function send() {
         message = "Envoi au casque…";
-        api("POST", "/api/send", {
+        request("POST", "/api/send", {
             parts: parts.map(function (p) { return { id: p.id, count: p.count } }),
             seats: seats.map(function (s) { return { part: s.part.id, copy: s.copy, x: +s.x.toFixed(2), y: +s.y.toFixed(2) } }),
-            sections: sections, reverb: reverb, directivity: directivity
+            preset: preset, sections: sections, reverb: reverb, directivity: directivity
         }, function (code, text) {
             if (code !== 200) { message = "Erreur : " + text; return }
             var n = JSON.parse(text).headsets;
             message = n ? "Envoyé à " + n + " casque" + (n > 1 ? "s" : "") + "." : "Enregistré : le casque le chargera en se connectant.";
         });
     }
-    function control(cmd) { api("POST", "/api/control", { cmd: cmd }) }
+    function control(cmd) { request("POST", "/api/control", { cmd: cmd }) }
 
     // --- interface -------------------------------------------------------------
+    component Bar: Rectangle { // value 0..1, or -1: working, no idea how far
+        id: bar
+        property real value: 0
+        implicitHeight: 6; radius: 3; color: root.line; clip: true
+        onValueChanged: if (value >= 0) fill.x = 0
+        Rectangle {
+            id: fill
+            height: bar.height; radius: 3; color: root.accent
+            width: bar.value < 0 ? bar.width / 3 : bar.width * bar.value
+            SequentialAnimation on x { // back and forth while MuseScore works
+                running: bar.value < 0; loops: Animation.Infinite
+                NumberAnimation { from: 0; to: bar.width * 2 / 3; duration: 900; easing.type: Easing.InOutQuad }
+                NumberAnimation { from: bar.width * 2 / 3; to: 0; duration: 900; easing.type: Easing.InOutQuad }
+            }
+        }
+    }
+    function tasks() { return status.job && status.job.tasks || [] }
+    function overall() { var t = tasks(); return t.length ? t.reduce(function (a, x) { return a + Math.max(0, x.value) }, 0) / t.length : -1 }
     component Btn: Rectangle {
         property alias text: label.text
         property bool primary: false
@@ -158,25 +179,22 @@ MuseScore {
             id: top
             anchors { left: parent.left; right: parent.right; top: parent.top }
             height: 48; color: root.panel
-            Row {
+            Row { // all on the left: MuseScore may open the window narrower than asked
                 anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
-                spacing: 10
-                Text { text: "MuseScoreVR"; color: root.fg; font.pixelSize: 15; font.bold: true }
-                Text { text: root.project ? root.project.title : ""; color: root.dim; font.pixelSize: 14 }
-            }
-            Row {
-                anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
                 spacing: 6
+                Text { text: "MuseScoreVR"; color: root.fg; font.pixelSize: 15; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                Item { width: 12; height: 1 }
+                Btn { text: "Envoyer au casque"; primary: true; enabled2: !!root.project && !root.busy; onClicked: root.send() }
+                Item { width: 12; height: 1 }
+                Btn { text: "▶ Lecture"; enabled2: !!root.status.headsets; onClicked: root.control("play") }
+                Btn { text: "❚❚ Pause"; enabled2: !!root.status.headsets; onClicked: root.control("pause") }
+                Btn { text: "■ Stop"; enabled2: !!root.status.headsets; onClicked: root.control("stop") }
+                Item { width: 12; height: 1 }
                 Rectangle { width: 8; height: 8; radius: 4; anchors.verticalCenter: parent.verticalCenter; color: root.status.headsets ? "#3ecf8e" : "#555" }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter; color: root.status.headsets ? root.fg : root.dim; font.pixelSize: 13
                     text: root.status.headsets ? root.status.headsets + " casque" + (root.status.headsets > 1 ? "s connectés" : " connecté") : "aucun casque"
                 }
-                Btn { text: "▶"; enabled2: !!root.status.headsets; onClicked: root.control("play") }
-                Btn { text: "❚❚"; enabled2: !!root.status.headsets; onClicked: root.control("pause") }
-                Btn { text: "■"; enabled2: !!root.status.headsets; onClicked: root.control("stop") }
-                Item { width: 8; height: 1 }
-                Btn { text: "Envoyer au casque"; primary: true; enabled2: !!root.project && !root.busy; onClicked: root.send() }
             }
             Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: root.line }
         }
@@ -193,6 +211,20 @@ MuseScore {
                 Column {
                     id: col
                     width: parent.width; spacing: 4
+                    Text { color: root.dim; font.pixelSize: 11; font.capitalization: Font.AllUppercase; font.letterSpacing: 1; text: "Disposition" }
+                    Flow {
+                        width: col.width; spacing: 6
+                        Repeater {
+                            model: Object.keys(Layout.PRESETS)
+                            Btn {
+                                required property string modelData
+                                text: Layout.PRESETS[modelData].name
+                                primary: root.preset === modelData
+                                onClicked: root.setPreset(modelData)
+                            }
+                        }
+                    }
+                    Item { width: 1; height: 10 }
                     Text {
                         color: root.dim; font.pixelSize: 11; font.capitalization: Font.AllUppercase; font.letterSpacing: 1
                         text: "Musiciens" + (root.rev >= 0 && root.seats.length ? " · " + root.seats.length : "")
@@ -315,10 +347,25 @@ MuseScore {
                     anchors { left: parent.left; right: parent.right; top: parent.top; margins: 18 }
                     spacing: 12
                     Text { width: parent.width; wrapMode: Text.Wrap; color: root.fg; font.pixelSize: 14; text: root.message || "…" }
-                    ProgressBar {
-                        width: parent.width; visible: root.busy
-                        indeterminate: !(root.status.job && root.status.job.done)
-                        value: root.status.job && root.status.job.total ? root.status.job.done / root.status.job.total : 0
+                    Bar { width: parent.width; visible: root.busy; value: root.overall() }
+                    ListView { // one line per part, then the music stands
+                        id: taskList
+                        width: parent.width; height: Math.min(contentHeight, 300); clip: true; spacing: 8
+                        visible: root.busy && count > 0
+                        model: root.tasks()
+                        onModelChanged: { // follow the task in progress
+                            var i = model.findIndex(function (t) { return t.value < 1 }); if (i >= 0) positionViewAtIndex(i, ListView.Contain)
+                        }
+                        delegate: Column {
+                            required property var modelData
+                            width: taskList.width; spacing: 3
+                            Item {
+                                width: parent.width; height: 16
+                                Text { text: modelData.name; color: modelData.value === 0 ? root.dim : root.fg; font.pixelSize: 12; elide: Text.ElideRight; width: parent.width * 0.5 }
+                                Text { anchors.right: parent.right; text: modelData.step + (modelData.value > 0 && modelData.value < 1 ? " " + Math.round(modelData.value * 100) + " %" : ""); color: root.dim; font.pixelSize: 11 }
+                            }
+                            Bar { width: parent.width; height: 4; value: modelData.value; opacity: modelData.value === 0 ? 0.4 : 1 }
+                        }
                     }
                     Text {
                         width: parent.width; wrapMode: Text.Wrap; color: root.dim; font.pixelSize: 12; visible: root.busy

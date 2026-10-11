@@ -141,7 +141,7 @@ const key = s => s.part.id + ':' + s.copy;
 export const seatName = s => s.part.name + (s.part.count > 1 ? ' #' + (s.copy + 1) : '');
 export function layout() { // rebuild seats from part counts; chairs the user moved keep their place
   const prev = new Map(S.seats.map(s => [key(s), s]));
-  const list = arrange(S.parts);
+  const list = arrange(S.parts, S.project?.preset);
   for (const s of list) { const o = prev.get(key(s)); if (o && o.moved) Object.assign(s, { x: o.x, y: o.y, moved: true }); }
   const was = S.listener && key(S.listener);
   S.seats = list; S.listener = S.seats.find(s => key(s) === was) || null;

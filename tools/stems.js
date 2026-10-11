@@ -23,8 +23,10 @@ const MSCORE_DEFAULT = process.env.MSCORE ?? {
   win32: 'C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe',
 }[process.platform] ?? 'mscore';
 
-// <Part id="N"> ... first <trackName> is the part's display name; Map keeps score order
-export const partNames = mscx => new Map([...mscx.matchAll(/<Part id="(\d+)">[\s\S]*?<trackName>([^<]*)/g)].map(m => [m[1], m[2]]));
+// <Part id="N"> ... first <trackName> is the part's display name; Map keeps score order.
+// Parts hidden in MuseScore (<show>0</show>, written before <trackName>) are left out.
+export const partNames = mscx => new Map([...mscx.matchAll(/<Part id="(\d+)">([\s\S]*?)<trackName>([^<]*)/g)]
+  .filter(m => !m[2].includes('<show>0</show>')).map(m => [m[1], m[3]]));
 
 // instrument id -> [family id, family display name, rank] from the score's <Order> block.
 // The order lists families front to back (woodwinds, brass, percussion...); families it doesn't list rank last.
@@ -36,9 +38,10 @@ export function families(mscx) {
     .map(([, inst, fid, name]) => [inst, [fid, name, ranks.get(fid) ?? ranks.size]]));
 }
 
-// progress(message, done, total): called as parts are rendered (the CLI prints it; the server reports it)
+// progress(tasks): called whenever a task moves (the CLI prints it; the server reports it).
+//   tasks: [{ name, step, value }], one per part then the music stands; value 0..1, or -1 while MuseScore works (no way to know how far)
 // opts: { mscore: MuseScore executable, title, source: id of the score file, kept in project.json }
-export async function render(src, out, progress = (msg, i, n) => console.log(`${i}/${n}`, msg), opts = {}) {
+export async function render(src, out, progress = tasks => console.log(tasks.map(t => `${t.name}: ${t.step}`).join(' · ')), opts = {}) {
   const MSCORE = opts.mscore ?? MSCORE_DEFAULT;
   if (!src || !out) throw new Error('usage: bun tools/stems.js score.mscz project.zip');
   const tmp = await mkdtemp(join(tmpdir(), 'musescorevr-'));
@@ -56,8 +59,12 @@ export async function render(src, out, progress = (msg, i, n) => console.log(`${
     const project = [], parts = [];
     let duration = 0;
 
-    let done = 0; const steps = names.size + 1; // every part, then the scores
-    for (const [pid, name] of names) { // score order (top to bottom), used to break ties within a family
+    const tasks = [...names.values()].map(name => ({ name, step: 'en attente', value: 0 }));
+    const stands = { name: 'Partitions des pupitres', step: 'en attente', value: 0 };
+    tasks.push(stands);
+    const set = (t, step, value) => { Object.assign(t, { step, value }); progress(tasks); };
+    progress(tasks);
+    for (const [i, [pid, name]] of [...names].entries()) { // score order (top to bottom), used to break ties within a family
       // solo this part, kill reverb sends -> dry stem
       const settings = JSON.parse(text('audiosettings.json'));
       for (const t of settings.tracks) {
@@ -68,11 +75,13 @@ export async function render(src, out, progress = (msg, i, n) => console.log(`${
       const solo = [...files].map(([n, f]) => n === 'audiosettings.json'
         ? { name: n, crc: crc32(json), data: new Blob([json]) } : { name: n, crc: f.crc, data: new Blob([f.bytes]) });
       await Bun.write(join(tmp, 's.mscz'), writeZip(solo));
+      set(tasks[i], 'rendu par MuseScore', -1);
       await $`${MSCORE} -o ${join(tmp, 's.wav')} ${join(tmp, 's.mscz')}`.quiet();
       const frames = wavToMono(new Uint8Array(await Bun.file(join(tmp, 's.wav')).arrayBuffer()), RATE); // sliced sample-exact below
       duration = frames.length / RATE;
-      const chunks = [];
-      for (let k = 0; k * CHUNK * RATE < frames.length; k++) {
+      const chunks = [], count = Math.ceil(frames.length / (CHUNK * RATE));
+      for (let k = 0; k < count; k++) {
+        if (k % 8 === 0) { set(tasks[i], 'compression', k / count); await Bun.sleep(0); } // let the server answer meanwhile
         const slice = frames.subarray(k * CHUNK * RATE, (k + 1) * CHUNK * RATE);
         if (!slice.some(x => Math.abs(x) >= SILENT)) { chunks.push(null); continue; }
         const entry = `${pid}/${k}.flac`, bytes = encodeFlac(slice, RATE);
@@ -82,10 +91,10 @@ export async function render(src, out, progress = (msg, i, n) => console.log(`${
       const inst = tracks.get(pid).instrumentId;
       const [family, familyName, familyRank] = fams[inst] ?? [inst, name, Object.keys(fams).length];
       parts.push({ id: pid, name, instrument: inst, family, familyName, familyRank, count: 1, chunks });
-      progress(name, ++done, steps);
+      set(tasks[i], 'terminé', 1);
     }
 
-    progress('partitions des pupitres', done, steps);
+    set(stands, 'mise en page par MuseScore', -1);
     // music stands: one MuseScore batch run exports every page as SVG plus segment timings, in page layout
     const paged = new Map([...files].map(([n, f]) => [n, n.endsWith('.mscx')
       ? { crc: null, bytes: new TextEncoder().encode(new TextDecoder().decode(f.bytes).replace(/\s*<layoutMode>\w+<\/layoutMode>/, '')) } : f]));
@@ -103,7 +112,9 @@ export async function render(src, out, progress = (msg, i, n) => console.log(`${
     }
     await Bun.write(join(tmp, 'job.json'), JSON.stringify(job));
     await $`${MSCORE} -j ${join(tmp, 'job.json')}`.quiet();
-    for (const key of sheets.keys()) {
+    set(stands, 'repérage des notes', 0);
+    for (const [k, key] of [...sheets.keys()].entries()) {
+      set(stands, 'repérage des notes', k / sheets.size); await Bun.sleep(0);
       const pages = [...new Bun.Glob(`${key}-*.svg`).scanSync(tmp)].sort((a, b) => parseInt(a.slice(key.length + 1)) - parseInt(b.slice(key.length + 1)));
       if (!pages.length) pages.push(`${key}.svg`); // single page: no number
       const svgs = await Promise.all(pages.map(p => Bun.file(join(tmp, p)).text()));
@@ -113,7 +124,7 @@ export async function render(src, out, progress = (msg, i, n) => console.log(`${
     }
     for (const p of parts) if (sheets.has(p.id)) p.sheet = `scores/${p.id}`;
     const missing = parts.filter(p => !p.sheet).map(p => p.name);
-    if (missing.length) progress(`sans partie séparée (générez les parties dans MuseScore) : ${missing.join(', ')}`, done, steps);
+    set(stands, missing.length ? `sans partie séparée : ${missing.join(', ')} (générez les parties dans MuseScore)` : 'terminé', 1);
 
     const meta = { version: 1, title: opts.title ?? basename(src, '.mscz').trim(), source: opts.source, chunk: CHUNK, duration, sheet: 'scores/full', parts };
     const json = new TextEncoder().encode(JSON.stringify(meta, null, 2));

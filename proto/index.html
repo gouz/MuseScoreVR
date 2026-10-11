@@ -13,7 +13,7 @@
 <h1>MuseScoreVR</h1>
 <p id="status">En attente d'un morceau envoyé depuis le configurateur…</p>
 <p><small>Ou ouvrir un projet présent sur le casque :</small> <input id="file" type="file" accept=".zip,application/zip"></p>
-<small>Dans le casque : gâchette sur un musicien = écouter depuis sa place · gâchette sur le podium = chef · poignée = lecture / pause (aussi pilotable depuis le configurateur).</small>
+<small>Dans le casque, avec les mains ou les manettes : viser + pincer (ou gâchette) un musicien = écouter depuis sa place, le podium = chef · panneau à votre droite, à toucher du doigt ou viser + pincer = lecture / pause, stop, ±10 s, barre de temps (aussi pilotable depuis MuseScore).</small>
 <script type="importmap">{ "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
@@ -22,7 +22,8 @@
 // Headset player: renders a project prepared in config.html; nothing about the orchestra is edited here.
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { S, ctx, play, pause, stop, now, meter, sitAt, setHead, placeAll, facing, seatName, openProject, projectFromUrl, file as entry } from './engine.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+import { S, ctx, play, pause, stop, seek, now, meter, sitAt, setHead, placeAll, facing, seatName, openProject, projectFromUrl, file as entry } from './engine.js';
 import { Sheet } from './stands.js';
 const status = document.getElementById('status'), file = document.getElementById('file');
 
@@ -80,19 +81,55 @@ function teleport(seat) {
   for (const m of band.children) m.visible = m.userData.seat !== seat; // don't sit inside your own cube
 }
 
-// controllers: trigger on a cube = sit there, trigger on the podium = conductor, grip = play/pause
-const ray = new THREE.Raycaster(), tmp = new THREE.Matrix4();
+// transport panel at the listener's right hand; a child of the rig, so it follows them from seat to seat.
+// Top row: stop, -10 s, play/pause, +10 s; bottom: time bar (trigger on it = go there)
+const pc = document.createElement('canvas'); pc.width = 512; pc.height = 192;
+const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.15), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(pc), transparent: true }));
+panel.position.set(0.32, 0.95, -0.38); panel.rotation.set(-0.7, -0.6, 0, 'YXZ'); rig.add(panel); // tilted towards the listener
+let drawn = '';
+function drawPanel() {
+  const t = now(), key = `${S.playing}:${Math.floor(t)}`;
+  if (key === drawn) return; drawn = key;
+  const g = pc.getContext('2d'), mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  g.clearRect(0, 0, 512, 192); g.fillStyle = 'rgba(25,28,34,0.92)'; g.beginPath(); g.roundRect(0, 0, 512, 192, 24); g.fill();
+  g.fillStyle = '#e4e6eb'; g.font = '56px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  ['■', '−10', S.playing ? '❚❚' : '▶', '+10'].forEach((b, i) => { g.font = i % 2 ? '40px system-ui' : '56px system-ui'; g.fillText(b, 64 + i * 128, 62); });
+  g.fillStyle = '#2a2e37'; g.fillRect(24, 132, 464, 12); g.fillStyle = '#4f8cff'; g.fillRect(24, 132, 464 * Math.min(1, t / (S.duration || 1)), 12);
+  g.fillStyle = '#8b909c'; g.font = '26px system-ui'; g.fillText(`${mmss(t)} / ${mmss(S.duration)}`, 256, 172);
+  panel.material.map.needsUpdate = true;
+}
+function pressPanel({ x, y }) { // uv: (0,0) bottom left
+  if (y < 0.33) return seek(Math.max(0, Math.min(1, (x * 512 - 24) / 464)) * S.duration);
+  [stop, () => seek(Math.max(0, now() - 10)), () => S.playing ? pause() : play(), () => seek(Math.min(S.duration, now() + 10))][Math.min(3, Math.floor(x * 4))]();
+}
+
+// hands or controllers: pinch / trigger on a cube = sit there, on the podium = conductor, on the panel = transport; grip = play/pause
+const ray = new THREE.Raycaster(), tmp = new THREE.Matrix4(), hands = new XRHandModelFactory();
 for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
   c.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -5)]), new THREE.LineBasicMaterial({ color: 0xffffff })));
   c.addEventListener('select', () => {
     tmp.identity().extractRotation(c.matrixWorld);
     ray.ray.origin.setFromMatrixPosition(c.matrixWorld); ray.ray.direction.set(0, 0, -1).applyMatrix4(tmp);
-    const hit = ray.intersectObjects([...band.children, podium], false)[0];
-    if (hit) teleport(hit.object === podium ? null : hit.object.userData.seat);
+    const hit = ray.intersectObjects([panel, ...band.children, podium], false)[0];
+    if (hit?.object === panel) pressPanel(hit.uv);
+    else if (hit) teleport(hit.object === podium ? null : hit.object.userData.seat);
   });
   c.addEventListener('squeeze', () => S.playing ? pause() : play());
   rig.add(c);
+  const hand = renderer.xr.getHand(i); hand.add(hands.createHandModel(hand, 'mesh')); rig.add(hand);
+}
+// touch the panel with an index fingertip: press once when the finger goes through it
+const tip = new THREE.Vector3(), touching = [false, false];
+function poke() {
+  for (let i = 0; i < 2; i++) {
+    const j = renderer.xr.getHand(i).joints['index-finger-tip'];
+    if (!j?.visible) { touching[i] = false; continue; }
+    panel.worldToLocal(j.getWorldPosition(tip));
+    const on = Math.abs(tip.z) < 0.015 && Math.abs(tip.x) < 0.2 && Math.abs(tip.y) < 0.075;
+    if (on && !touching[i]) pressPanel({ x: tip.x / 0.4 + 0.5, y: tip.y / 0.15 + 0.5 });
+    touching[i] = on;
+  }
 }
 
 const head = new THREE.Vector3(), fwd = new THREE.Vector3(), up = new THREE.Vector3(), q = new THREE.Quaternion();
@@ -102,11 +139,12 @@ renderer.setAnimationLoop(() => {
     const cam = renderer.xr.getCamera(); // head pose drives the ears
     cam.getWorldPosition(head); cam.getWorldDirection(fwd); up.set(0, 1, 0).applyQuaternion(cam.getWorldQuaternion(q));
     setHead(head.x, head.y, head.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z);
+    poke();
   } else { // flat preview: eyes of a seated player, or of the standing conductor
     const c = renderer.domElement; if (c.width !== c.clientWidth) { renderer.setSize(c.clientWidth, c.clientHeight, false); camera.aspect = c.clientWidth / c.clientHeight; camera.updateProjectionMatrix(); }
     camera.position.set(0, S.listener ? 1.2 : 1.65, 0); camera.rotation.x = -0.3;
   }
-  meter();
+  meter(); drawPanel();
   const t = now(); for (const sh of sheets) sh.update(t);
   for (const m of band.children) { const lv = m.userData.seat.part.level || 0; m.material.emissiveIntensity = 1.5 * lv; m.scale.setScalar(1 + 0.2 * lv); }
   renderer.render(scene, camera);
@@ -121,7 +159,7 @@ async function open(blob) {
   build3d(); teleport(null); await buildStands();
   renderer.domElement.style.display = '';
   status.textContent = `${project.title} · ${S.seats.length} musiciens — prêt, entrez en VR.`;
-  if (!document.getElementById('VRButton')) document.body.append(VRButton.createButton(renderer));
+  if (!document.getElementById('VRButton')) document.body.append(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
 }
 const fail = e => status.textContent = 'Erreur : ' + (e.message || e);
 file.onchange = () => file.files[0] && open(file.files[0]).catch(fail);

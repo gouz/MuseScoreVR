@@ -3,23 +3,54 @@
 const SEAT = 1.1, ROW = 1.2, GAP = 0.6; // metres: chair to chair, row to row, between blocks
 const R0 = 2.5, SPAN = 2.44, MAXCOLS = 4; // first arc radius (m), arc opening (rad, ±70°), block width (chairs)
 
-// parts: [{ id, family, familyRank, count }] -> seats: [{ part, copy, x, y }] (band at y < 0)
-export function arrange(parts) {
-  const fams = new Map(); // families front to back, score order within a family (stable sort)
-  for (const p of [...parts].sort((a, b) => (a.familyRank ?? 0) - (b.familyRank ?? 0)))
-    for (let c = 0; c < p.count; c++) {
-      const f = p.family ?? p.id;
-      if (!fams.has(f)) fams.set(f, []);
-      fams.get(f).push({ part: p, copy: c });
-    }
-  const blocks = [...fams.values()].map(seats => {
-    const rows = Math.ceil(seats.length / MAXCOLS);
-    return { seats, rows, cols: Math.ceil(seats.length / rows) };
-  });
+// Seating presets: arcs front to back, each a list of groups left to right (seen from the podium).
+// A group is matched by MuseScore instrument id or family id; anything no group takes goes behind, in score order.
+const PERC = ['timpani', 'keyboard-percussion', 'pitched-metal-percussion', 'unpitched-metal-percussion', 'unpitched-wooden-percussion',
+  'drums', 'batterie', 'other-percussion', 'roto-toms', 'glass-percussion', 'orff-percussion'];
+const VIOLINS = ['violin', 'violins'], VIOLAS = ['viola', 'violas'], CELLOS = ['violoncello', 'violoncellos'], BASSES = ['contrabass', 'contrabasses'];
+export const PRESETS = {
+  auto: { name: 'Ordre de la partition', tiers: [] },
+  symphonic: { name: 'Orchestre symphonique', tiers: [
+    [VIOLINS, VIOLAS, CELLOS],
+    [['harps', 'keyboards', 'organs'], ['flutes'], ['oboes'], BASSES],
+    [['clarinets', 'saxophones'], ['bassoons']],
+    [['horns', 'wagner-tubas'], ['trumpets', 'cornets'], ['trombones'], ['tubas', 'cimbassos']],
+    [PERC],
+  ] },
+  band: { name: "Orchestre d'harmonie", tiers: [
+    [['flutes'], ['oboes'], ['clarinets']],
+    [['bassoons'], ['saxophones'], ['horns']],
+    [['trumpets', 'cornets', 'flugelhorns'], ['trombones'], ['euphoniums', 'baritone-horns', 'alto-horns', 'saxhorns'], ['tubas', 'sousaphones'], BASSES],
+    [PERC, ['keyboards', 'harps']],
+  ] },
+  bigband: { name: 'Big band', tiers: [
+    [['drums', 'batterie', 'guitars', 'bass-guitars', 'keyboards', ...BASSES], ['saxophones', 'clarinets', 'flutes']],
+    [['trombones']],
+    [['trumpets', 'flugelhorns', 'cornets']],
+  ] },
+};
+
+// parts: [{ id, instrument, family, familyRank, count }], preset id -> seats: [{ part, copy, x, y }] (band at y < 0)
+export function arrange(parts, preset = 'auto') {
+  const tiers = (PRESETS[preset] ?? PRESETS.auto).tiers;
+  const slot = p => { // [tier, group] of the first group that takes this part
+    for (let t = 0; t < tiers.length; t++)
+      for (let g = 0; g < tiers[t].length; g++) if (tiers[t][g].includes(p.instrument) || tiers[t][g].includes(p.family)) return [t, g];
+    return null;
+  };
+  const groups = new Map(); // block key -> { tier, seats }; parts in score order within a block (stable sort)
+  for (const p of [...parts].sort((a, b) => (a.familyRank ?? 0) - (b.familyRank ?? 0))) {
+    const at = slot(p), key = at ? at.join(':') : 'f:' + (p.family ?? p.id);
+    if (!groups.has(key)) groups.set(key, { tier: at ? at[0] : tiers.length, group: at ? at[1] : 0, seats: [] });
+    for (let c = 0; c < p.count; c++) groups.get(key).seats.push({ part: p, copy: c });
+  }
+  const blocks = [...groups.values()].filter(g => g.seats.length).sort((a, b) => a.tier - b.tier || a.group - b.group) // unmatched keep score order
+    .map(({ tier, seats }) => { const rows = Math.ceil(seats.length / MAXCOLS); return { tier, seats, rows, cols: Math.ceil(seats.length / rows) }; });
 
   let r = R0, tier = [];
   const width = bs => bs.reduce((w, b) => w + b.cols * SEAT, 0) + GAP * Math.max(0, bs.length - 1);
   const place = () => { // centre the tier's blocks on the arc, then move behind its deepest block
+    if (tier[0].tier < tiers.length) r = Math.max(r, width(tier) / SPAN); // a preset arc is never split: it widens
     let a = -width(tier) / 2 / r;
     for (const b of tier) {
       b.seats.forEach((s, i) => {
@@ -31,11 +62,12 @@ export function arrange(parts) {
     r += Math.max(...tier.map(b => b.rows)) * ROW; tier = [];
   };
   for (const b of blocks) {
-    if (tier.length && width([...tier, b]) > SPAN * r) place();
+    // a new preset arc, or this arc is full
+    if (tier.length && (b.tier !== tier[0].tier || b.tier === tiers.length && width([...tier, b]) > SPAN * r)) place();
     tier.push(b);
   }
   if (tier.length) place();
-  return blocks.flatMap(b => b.seats);
+  return [].concat(...blocks.map(b => b.seats)); // no flatMap: MuseScore's QML engine lacks it
 }
 
 // Instrument radiation: where the sound mostly goes, relative to a player facing the conductor

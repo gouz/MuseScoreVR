@@ -7,13 +7,14 @@
 //     GET  /api/project    the last project sent
 //     WS   /api/events     headsets listen here: { project: n } = fetch it, { cmd } = play|pause|stop
 //   This PC only, HTTP (Qt refuses self-signed certificates), for the plugin:
-//     GET  /api/status     { headsets, urls, job, project }   job: render progress; project: the one being configured
-//     POST /api/render     { path }   render a .mscz into <data>/projects/, or reuse the last render of the same file
-//     POST /api/send       { parts: [{ id, count }], seats, sections, reverb, directivity }   save, send to the headsets
+//     GET  /api/status     { headsets, urls, job, project }   job: render progress { title, tasks, error }; project: the one being configured
+//     POST /api/render     { path } or { names }   render a .mscz into <data>/projects/, or reuse the last render of the same file;
+//                          names: the open score's names, looked up in MuseScore's recent files (a plugin can't save a .mscz)
+//     POST /api/send       { parts: [{ id, count }], seats, preset, sections, reverb, directivity }   save, send to the headsets
 //     POST /api/control    { cmd }
 import { resolve, sep, join, basename } from 'node:path';
 import { mkdir, rename } from 'node:fs/promises';
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, homedir } from 'node:os';
 import selfsigned from 'selfsigned';
 import { render } from './stems.js';
 import { readZip, writeZip, crc32 } from '../proto/zip.js';
@@ -33,7 +34,7 @@ if (!(await Bun.file(join(certs, 'cert.pem')).exists())) {
 }
 
 let current = null, version = 0; // the project the headsets get
-let job = null; // render in progress: { title, msg, done, total, error }
+let job = null; // render in progress: { title, tasks, error }
 let open = null; // { file, meta }: the rendered project being configured in the plugin
 
 const lan = Bun.serve({
@@ -59,6 +60,17 @@ const headsets = () => lan.subscriberCount('headsets');
 const readMeta = async file => JSON.parse(await (await (await readZip(Bun.file(file))).get('project.json').blob()).text());
 const slug = name => name.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().replace(/\s+/g, '-').toLowerCase() || 'partition';
 
+// MuseScore's recent files, most recent first: the score open in MuseScore is there once it has been saved
+const RECENT = join({ darwin: join(homedir(), 'Library/Application Support'), win32: process.env.LOCALAPPDATA ?? '' }[process.platform]
+  ?? process.env.XDG_DATA_HOME ?? join(homedir(), '.local/share'), 'MuseScore/MuseScore4/recent_files.json');
+async function findScore(names) {
+  const recent = await Bun.file(RECENT).json().catch(() => []);
+  for (const r of recent) {
+    const path = typeof r === 'string' ? r : r.path, shown = typeof r === 'string' ? '' : r.displayName;
+    if (names.some(n => n && (n === shown || n === basename(path, '.mscz'))) && await Bun.file(path).exists()) return path;
+  }
+}
+
 async function startRender(src, title) {
   const out = join(projects, slug(title) + '.zip');
   // same score content -> same render (an export from MuseScore changes the zip's dates, not its entries)
@@ -66,8 +78,8 @@ async function startRender(src, title) {
   const meta = await readMeta(out).catch(() => null);
   if (meta?.source === source) { open = { file: out, meta }; job = null; return; }
   await mkdir(projects, { recursive: true });
-  open = null; job = { title, msg: 'Rendu par MuseScore…', done: 0, total: 1 };
-  render(src, out, (msg, done, total) => Object.assign(job, { msg, done, total }), { title, source, mscore: arg('--mscore') })
+  open = null; job = { title, tasks: [] };
+  render(src, out, tasks => { job.tasks = tasks; }, { title, source, mscore: arg('--mscore') })
     .then(async () => { open = { file: out, meta: await readMeta(out) }; job = null; })
     .catch(e => { job.error = e.message; });
 }
@@ -76,7 +88,7 @@ async function send(cfg) { // write the configuration into the project file, the
   const counts = new Map((cfg.parts ?? []).map(p => [String(p.id), Math.max(0, Math.min(8, p.count | 0))]));
   const meta = { ...open.meta, parts: open.meta.parts.map(p => ({ ...p, count: counts.get(p.id) ?? p.count })),
     seats: (cfg.seats ?? []).map(s => ({ part: String(s.part), copy: s.copy | 0, x: +s.x || 0, y: +s.y || 0 })),
-    sections: cfg.sections === 'raw' ? 'raw' : 'decor', reverb: Math.max(0, Math.min(1, +cfg.reverb || 0)), directivity: cfg.directivity !== false };
+    preset: typeof cfg.preset === 'string' ? cfg.preset : 'auto', sections: cfg.sections === 'raw' ? 'raw' : 'decor', reverb: Math.max(0, Math.min(1, +cfg.reverb || 0)), directivity: cfg.directivity !== false };
   // Bun drops Bun.file() parts inside a new Blob: entries are read into memory before the file is replaced
   const files = [];
   for (const [name, e] of await readZip(Bun.file(open.file)))
@@ -98,7 +110,8 @@ Bun.serve({
         project: open && { ...open.meta, parts: open.meta.parts.map(({ chunks, ...p }) => p) } });
       if (path === '/api/render' && req.method === 'POST') {
         if (job && !job.error) return new Response('Un rendu est déjà en cours', { status: 409 });
-        const { path: src, title } = await body();
+        const { path, names = [], title } = await body();
+        const src = path ?? await findScore(names);
         if (!src || !(await Bun.file(src).exists())) return new Response('Partition introuvable', { status: 400 });
         await startRender(src, title || basename(src, '.mscz')); return Response.json({ ok: true });
       }

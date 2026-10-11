@@ -51,7 +51,9 @@ dans le casque, mais la télécommande ne répond plus).
 bun install
 bun run plugin --here   # compile le serveur pour ce système seulement, copie la page du casque dans plugin/
 bun run plugin          # pour macOS (binaire universel), Windows et Linux : à faire avant de distribuer
-ln -s "$PWD/plugin" ~/Documents/MuseScore4/Plugins/MuseScoreVR   # lien plutôt que copie pendant le développement
+# pendant le développement, un vrai dossier dont le contenu est lié (MuseScore ne suit pas un dossier lié) :
+mkdir -p ~/Documents/MuseScore4/Plugins/MuseScoreVR
+for f in MuseScoreVR.qml layout.mjs bin web; do ln -sfn "$PWD/plugin/$f" ~/Documents/MuseScore4/Plugins/MuseScoreVR/; done
 bun run serve           # le serveur depuis les sources (le plugin l'utilise s'il tourne déjà)
 bun run stems partition.mscz projet.zip   # le rendu seul, en ligne de commande
 ```

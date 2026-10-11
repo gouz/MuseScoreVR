@@ -39,3 +39,18 @@ assert.ok(h[0] < 0 && h[2] < 0, 'horn bell back-right');
 assert.ok(radiation({ family: 'tubas' }, [0, 1]).dir[1] > 0.9, 'tuba bell up');
 assert.equal(radiation({ family: 'drums' }, [0, 1]), null);
 });
+
+test('presets: symphonic strings in front, big band rows', () => {
+  const p = (instrument, family, familyRank) => ({ id: instrument, instrument, family, familyRank, count: 2 });
+  const parts = [p('flute', 'flutes', 0), p('horn', 'horns', 4), p('timpani', 'timpani', 8), p('violin', 'strings', 10), p('viola', 'strings', 11), p('violoncello', 'strings', 12), p('contrabass', 'strings', 13), p('kazoo', 'kazoos', 14)];
+  const seats = arrange(parts, 'symphonic'), d = id => Math.min(...seats.filter(s => s.part.id === id).map(s => Math.hypot(s.x, s.y)));
+  const x = id => seats.filter(s => s.part.id === id)[0].x;
+  assert.equal(seats.length, 16);
+  assert.ok(d('violin') < d('flute') && d('flute') < d('horn') && d('horn') < d('timpani') && d('timpani') < d('kazoo'), 'arcs front to back, unknown last');
+  assert.ok(x('violin') < x('viola') && x('viola') < x('violoncello'), 'violins left, cellos right');
+  assert.ok(x('contrabass') > x('flute'), 'basses on the right');
+  const bb = arrange([p('bb-trumpet', 'trumpets', 0), p('alto-saxophone', 'saxophones', 1), p('trombone', 'trombones', 2)], 'bigband');
+  const db = id => Math.hypot(bb.find(s => s.part.id === id).x, bb.find(s => s.part.id === id).y);
+  assert.ok(db('alto-saxophone') < db('trombone') && db('trombone') < db('bb-trumpet'));
+  assert.deepEqual(arrange(parts).length, arrange(parts, 'nope').length); // unknown preset = score order
+});
