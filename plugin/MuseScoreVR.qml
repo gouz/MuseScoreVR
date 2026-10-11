@@ -13,6 +13,7 @@ MuseScore {
     title: "MuseScoreVR"
     description: "Écouter la partition depuis l'intérieur de l'orchestre, dans un casque de réalité virtuelle"
     version: "0.1"
+    thumbnailName: "logo.png"
     pluginType: "dialog"
     requiresScore: true
     width: 960

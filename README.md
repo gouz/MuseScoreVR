@@ -60,7 +60,7 @@ bun run plugin          # pour macOS (binaire universel), Windows et Linux
 bun run plugin --release 1.2.0   # + dist/MuseScoreVR-1.2.0-<os>.zip, comme une release
 # pendant le développement, un vrai dossier dont le contenu est lié (MuseScore ne suit pas un dossier lié) :
 mkdir -p ~/Documents/MuseScore4/Plugins/MuseScoreVR
-for f in MuseScoreVR.qml layout.mjs bin web; do ln -sfn "$PWD/plugin/$f" ~/Documents/MuseScore4/Plugins/MuseScoreVR/; done
+for f in MuseScoreVR.qml layout.mjs logo.png bin web; do ln -sfn "$PWD/plugin/$f" ~/Documents/MuseScore4/Plugins/MuseScoreVR/; done
 bun run serve           # le serveur depuis les sources (le plugin l'utilise s'il tourne déjà)
 bun run stems partition.mscz projet.zip   # le rendu seul, en ligne de commande
 ```

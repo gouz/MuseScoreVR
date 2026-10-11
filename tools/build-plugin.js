@@ -53,6 +53,7 @@ if (version) {
     const qml = await Bun.file(join(out, 'MuseScoreVR.qml')).text();
     await Bun.write(join(dir, 'MuseScoreVR.qml'), qml.replace(/^(\s*version: )"[^"]*"/m, `$1"${version}"`));
     await copyFile(join(out, 'layout.mjs'), join(dir, 'layout.mjs'));
+    await copyFile(join(out, 'logo.png'), join(dir, 'logo.png')); // thumbnail in MuseScore's plugin list (source: logo.svg)
     await cp(join(out, 'web'), join(dir, 'web'), { recursive: true });
     await copyFile(join(out, 'bin', name), join(dir, 'bin', name));
     await $`zip -qr ${join(dist, `MuseScoreVR-${version}-${os}.zip`)} MuseScoreVR`.cwd(join(dist, os)); // zip keeps the exec bit
