@@ -13,7 +13,7 @@
 <h1>MuseScoreVR</h1>
 <p id="status">En attente d'un morceau envoyé depuis le configurateur…</p>
 <p><small>Ou ouvrir un projet présent sur le casque :</small> <input id="file" type="file" accept=".zip,application/zip"></p>
-<small>Dans le casque, avec les mains ou les manettes : viser + pincer (ou gâchette) un musicien = écouter depuis sa place, le podium = chef · panneau à votre droite, à toucher du doigt ou viser + pincer = lecture / pause, stop, ±10 s, quitter la VR (✕), volume, barre de temps (aussi pilotable depuis MuseScore).</small>
+<small>Dans le casque, avec les mains ou les manettes : viser + pincer (ou gâchette) un musicien = écouter depuis sa place, le podium = chef · panneau à votre droite, à toucher du doigt ou viser + pincer = lecture / pause, stop, ±10 s, quitter la VR (✕), place précédente / suivante, volume, barre de temps (aussi pilotable depuis MuseScore).</small>
 <script type="importmap">{ "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
@@ -82,31 +82,38 @@ function teleport(seat) {
 }
 
 // transport panel at the listener's right hand; a child of the rig, so it follows them from seat to seat.
-// Rows: stop, -10 s, play/pause, +10 s, leave VR · volume (−, bar, +) · time bar (touch = go there)
-const PW = 0.4, PH = 0.2; // metres
-const pc = document.createElement('canvas'); pc.width = 512; pc.height = 256;
+// Rows: stop, -10 s, play/pause, +10 s, leave VR · place (◀ seat ▶) · volume (−, bar, +) · time bar (touch = go there)
+const PW = 0.4, PH = 0.25; // metres
+const pc = document.createElement('canvas'); pc.width = 512; pc.height = 320;
 const panel = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(pc), transparent: true }));
 panel.position.set(0.32, 0.95, -0.38); panel.rotation.set(-0.7, -0.6, 0, 'YXZ'); rig.add(panel); // tilted towards the listener
 const BAR = [96, 416]; // volume bar, canvas x
 let drawn = '';
 function drawPanel() {
-  const t = now(), key = `${S.playing}:${Math.floor(t)}:${S.volume}`;
+  const t = now(), key = `${S.playing}:${Math.floor(t)}:${S.volume}:${S.seats.indexOf(S.listener)}`;
   if (key === drawn) return; drawn = key;
   const g = pc.getContext('2d'), mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-  g.clearRect(0, 0, 512, 256); g.fillStyle = 'rgba(25,28,34,0.92)'; g.beginPath(); g.roundRect(0, 0, 512, 256, 24); g.fill();
+  g.clearRect(0, 0, 512, 320); g.fillStyle = 'rgba(25,28,34,0.92)'; g.beginPath(); g.roundRect(0, 0, 512, 320, 24); g.fill();
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  ['■', '−10', S.playing ? '❚❚' : '▶', '+10', '✕'].forEach((b, i) => { g.font = i % 2 ? '36px system-ui' : '50px system-ui'; g.fillStyle = i === 4 ? '#ff7b72' : '#e4e6eb'; g.fillText(b, 51 + i * 102.4, 52); });
-  g.fillStyle = '#e4e6eb'; g.font = '44px system-ui'; g.fillText('−', 48, 136); g.fillText('+', 464, 136);
-  g.fillStyle = '#2a2e37'; g.fillRect(BAR[0], 130, BAR[1] - BAR[0], 12); g.fillStyle = '#3ecf8e'; g.fillRect(BAR[0], 130, (BAR[1] - BAR[0]) * S.volume / MAXVOL, 12);
-  g.fillStyle = '#8b909c'; g.font = '22px system-ui'; g.fillText(`volume ${Math.round(S.volume * 100)} %`, 256, 164);
-  g.fillStyle = '#2a2e37'; g.fillRect(24, 200, 464, 12); g.fillStyle = '#4f8cff'; g.fillRect(24, 200, 464 * Math.min(1, t / (S.duration || 1)), 12);
-  g.fillStyle = '#8b909c'; g.font = '22px system-ui'; g.fillText(`${mmss(t)} / ${mmss(S.duration)}`, 256, 236);
+  ['■', '−10', S.playing ? '❚❚' : '▶', '+10', '✕'].forEach((b, i) => { g.font = i % 2 ? '36px system-ui' : '50px system-ui'; g.fillStyle = i === 4 ? '#ff7b72' : '#e4e6eb'; g.fillText(b, 51 + i * 102.4, 48); });
+  g.fillStyle = '#e4e6eb'; g.font = '40px system-ui'; g.fillText('◀', 48, 128); g.fillText('▶', 464, 128);
+  g.font = '28px system-ui'; g.fillText(S.listener ? seatName(S.listener) : 'Chef d\'orchestre', 256, 128, 320);
+  g.font = '44px system-ui'; g.fillText('−', 48, 196); g.fillText('+', 464, 196);
+  g.fillStyle = '#2a2e37'; g.fillRect(BAR[0], 190, BAR[1] - BAR[0], 12); g.fillStyle = '#3ecf8e'; g.fillRect(BAR[0], 190, (BAR[1] - BAR[0]) * S.volume / MAXVOL, 12);
+  g.fillStyle = '#8b909c'; g.font = '22px system-ui'; g.fillText(`volume ${Math.round(S.volume * 100)} %`, 256, 222);
+  g.fillStyle = '#2a2e37'; g.fillRect(24, 262, 464, 12); g.fillStyle = '#4f8cff'; g.fillRect(24, 262, 464 * Math.min(1, t / (S.duration || 1)), 12);
+  g.fillStyle = '#8b909c'; g.font = '22px system-ui'; g.fillText(`${mmss(t)} / ${mmss(S.duration)}`, 256, 298);
   panel.material.map.needsUpdate = true;
 }
 function pressPanel({ x, y }) { // uv: (0,0) bottom left
-  const cx = x * 512, cy = (1 - y) * 256, clamp = v => Math.max(0, Math.min(1, v));
-  if (cy > 184) return seek(clamp((cx - 24) / 464) * S.duration);
-  if (cy > 104) return setVolume(cx < BAR[0] ? S.volume - 0.1 : cx > BAR[1] ? S.volume + 0.1 : clamp((cx - BAR[0]) / (BAR[1] - BAR[0])) * MAXVOL);
+  const cx = x * 512, cy = (1 - y) * 320, clamp = v => Math.max(0, Math.min(1, v));
+  if (cy > 240) return seek(clamp((cx - 24) / 464) * S.duration);
+  if (cy > 164) return setVolume(cx < BAR[0] ? S.volume - 0.1 : cx > BAR[1] ? S.volume + 0.1 : clamp((cx - BAR[0]) / (BAR[1] - BAR[0])) * MAXVOL);
+  if (cy > 96) { // places in order: the conductor, then every chair
+    if (cx > BAR[0] && cx < BAR[1]) return;
+    const places = [null, ...S.seats], k = places.indexOf(S.listener) + (cx < 256 ? -1 : 1);
+    return teleport(places[(k + places.length) % places.length]);
+  }
   [stop, () => seek(Math.max(0, now() - 10)), () => S.playing ? pause() : play(), () => seek(Math.min(S.duration, now() + 10)), () => renderer.xr.getSession()?.end()][Math.min(4, Math.floor(x * 5))]();
 }
 
