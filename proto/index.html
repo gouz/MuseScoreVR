@@ -10,8 +10,8 @@
 </head>
 <body>
 <h1>MuseScoreVR</h1>
-<p><input id="file" type="file" accept=".zip,application/zip"></p>
-<p id="status">Ouvrez un projet préparé dans le configurateur.</p>
+<p id="status">En attente d'un morceau envoyé depuis le configurateur…</p>
+<p><small>Ou ouvrir un projet présent sur le casque :</small> <input id="file" type="file" accept=".zip,application/zip"></p>
 <small>Dans le casque : gâchette sur un musicien = écouter depuis sa place · gâchette sur le podium = chef · poignée = lecture / pause.</small>
 <script type="importmap">{ "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
@@ -102,6 +102,20 @@ async function open(blob) {
 const fail = e => status.textContent = 'Erreur : ' + (e.message || e);
 file.onchange = () => file.files[0] && open(file.files[0]).catch(fail);
 projectFromUrl().then(b => b && open(b)).catch(fail);
+
+// the configurator pushes projects through the Bun server; reconnect if the PC goes away
+(function listen() {
+  const ws = new WebSocket(`wss://${location.host}/api/events`);
+  ws.onmessage = async () => {
+    status.textContent = 'Réception du morceau…';
+    try {
+      const r = await fetch('/api/project');
+      if (!r.ok) throw new Error(`serveur : ${r.status}`);
+      await open(await r.blob());
+    } catch (e) { fail(e); }
+  };
+  ws.onclose = () => setTimeout(listen, 2000);
+})();
 </script>
 </body>
 </html>

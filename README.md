@@ -15,13 +15,16 @@ en son spatialisé : depuis le podium du chef, ou depuis la chaise de n'importe 
 
 - [MuseScore 4](https://musescore.org) et les MuseSounds installés via Muse Hub
 - [Bun](https://bun.sh) ≥ 1.3
-- macOS pour l'instant : `tools/stems.js` utilise `afconvert` (le chemin de MuseScore se change avec la variable `MSCORE`)
+- [ffmpeg](https://ffmpeg.org) dans le `PATH`
+- MuseScore est cherché à son emplacement par défaut (macOS, Windows) ou comme `mscore` (Linux) ;
+  sinon indiquer son chemin dans la variable `MSCORE`
 - Un navigateur avec WebXR (navigateur du Quest), et Chrome ou Edge sur le PC
 
 ## Utilisation
 
 ```sh
-# 1. Rendre un projet depuis une partition (~30 s par partie)
+# 1. Rendre un projet depuis une partition enregistrée avec MuseScore 4 (~30 s par partie)
+#    (un fichier MuseScore 3 doit d'abord être ouvert puis enregistré dans MuseScore 4)
 bun run stems partition.mscz proto/projects/mon-morceau.zip
 
 # 2. Créer une fois le certificat local (le Quest exige HTTPS pour la VR)
@@ -33,9 +36,11 @@ mkdir -p .cert && openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
 bun run serve
 ```
 
-- **Configurer** sur le PC : `https://localhost:8443/config.html`, ouvrir le `.zip`, régler, « Enregistrer le projet ».
-- **Écouter** sur le Quest : `https://<ip-du-pc>:8443/` (accepter l'avertissement de certificat), ouvrir le projet
-  ou passer `?project=projects/mon-morceau.zip`, puis « Enter VR ».
+- **Sur le Quest** : ouvrir `https://<ip-du-pc>:8443/` (accepter l'avertissement de certificat) et le laisser ouvert.
+  Le casque attend qu'un morceau lui soit envoyé.
+- **Sur le PC** : `https://localhost:8443/config.html`, ouvrir le `.zip`, régler, puis **« Envoyer au casque »**.
+  Le Quest charge le morceau tout seul, même déjà en VR ; « Enregistrer le projet » garde la configuration dans un fichier.
+- Dans le casque, « Enter VR ».
   Gâchette sur un musicien : s'asseoir à sa place · gâchette sur le podium : revenir au chef · poignée : lecture / pause.
 
 ## Format de projet
@@ -59,7 +64,7 @@ quelle que soit la durée du morceau.
 
 ```
 tools/stems.js        .mscz → projet (rendu MuseScore en ligne de commande, une partie à la fois en solo)
-tools/serve.js        serveur HTTPS local
+tools/serve.js        serveur HTTPS local + relais configurateur → casques (WebSocket)
 proto/config.html     configurateur (PC)
 proto/index.html      lecteur VR (casque)
 proto/engine.js       commun : ouverture/enregistrement de projet, audio spatial en flux, niveaux

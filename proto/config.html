@@ -22,6 +22,7 @@
   <fieldset><legend>Projet</legend>
     <input id="file" type="file" accept=".zip,application/zip">
     <button id="save" disabled>Enregistrer le projet</button>
+    <button id="send" disabled>Envoyer au casque</button>
   </fieldset>
   <p id="status">Ouvrez un projet (.zip créé par « bun run stems »).</p>
   <fieldset><legend>Écoute</legend>
@@ -46,7 +47,7 @@
 <script type="module">
 import { S, play, pause, stop, seek, restart, now, meter, setReverb, setRoom, sitAt, placeAll, layout, seatName, openProject, saveProject, projectFromUrl } from './engine.js';
 const $ = id => document.getElementById(id);
-const [status, playBtn, stopBtn, pos, time, rev, partsEl, file, save] = ['status', 'play', 'stop', 'pos', 'time', 'rev', 'parts', 'file', 'save'].map($);
+const [status, playBtn, stopBtn, pos, time, rev, partsEl, file, save, send] = ['status', 'play', 'stop', 'pos', 'time', 'rev', 'parts', 'file', 'save', 'send'].map($);
 let PX = 40; // pixels per metre, refitted to the band on each draw except while dragging
 
 // --- plan ----------------------------------------------------------------
@@ -114,7 +115,7 @@ setInterval(() => {
 
 // --- project -------------------------------------------------------------
 async function open(blob) {
-  playBtn.disabled = save.disabled = true; status.textContent = 'Ouverture…';
+  playBtn.disabled = save.disabled = send.disabled = true; status.textContent = 'Ouverture…';
   const project = await openProject(blob);
   document.title = project.title + ' – configurateur MuseScoreVR';
   document.querySelector(`[name=mode][value=${S.sections}]`).checked = true;
@@ -135,8 +136,18 @@ async function open(blob) {
     row.append(name, n); return [...els, row];
   }));
   draw();
-  status.textContent = `${project.title} · ${S.parts.length} parties`; playBtn.disabled = save.disabled = false;
+  status.textContent = `${project.title} · ${S.parts.length} parties`; playBtn.disabled = save.disabled = send.disabled = false;
 }
+// the Bun server relays the project to every headset listening (tools/serve.js)
+send.onclick = async () => {
+  send.disabled = true; status.textContent = 'Envoi au casque…';
+  try {
+    const r = await fetch('/api/project', { method: 'POST', body: await saveProject() });
+    if (!r.ok) throw new Error(`serveur : ${r.status}`);
+    const { headsets } = await r.json();
+    status.textContent = headsets ? `Envoyé à ${headsets} casque${headsets > 1 ? 's' : ''}.` : 'Envoyé : le casque le chargera en se connectant.';
+  } catch (e) { fail(e); } finally { send.disabled = false; }
+};
 save.onclick = async () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(await saveProject()); a.download = (S.project.title || 'projet') + '.zip'; a.click();
