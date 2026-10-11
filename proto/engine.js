@@ -66,8 +66,11 @@ async function start() {
     }
     // the part's reverb amount from MuseScore's mixer, relative to its default send (0.3)
     const send = ctx.createGain(); send.gain.value = (s.part.reverb ?? 0.3) / 0.3;
-    out.connect(pan).connect(master); g.connect(send).connect(revSend);
-    s.in = g; s.pan = pan; chains.push(g, pan, send);
+    // propagation delay (set in placeAll): on stage the back rows arrive late, from the hall it all lines up;
+    // the reverb is fed after it, so the hall never answers before the direct sound arrives
+    const prop = ctx.createDelay(0.2);
+    out.connect(prop).connect(pan).connect(master); prop.connect(send).connect(revSend);
+    s.in = g; s.pan = pan; s.prop = prop; chains.push(g, prop, pan, send);
     if (s.copy === 0) { const an = ctx.createAnalyser(); an.fftSize = 1024; g.connect(an); s.part.an = an; chains.push(an); }
   }
   startAt = ctx.currentTime + 0.1; next = k0; placeAll(); pump();
@@ -120,6 +123,8 @@ export function meter() {
 
 // --- listener ------------------------------------------------------------
 // audio coords = three.js coords: x right, y up, z toward the conductor's back; band sits at z < 0
+// a seat in the stalls, facing the band: what the audience hears (14 m from the podium, ~16-25 m from the players)
+export const AUDIENCE = { audience: true, x: 0, y: 14 };
 // unit vector a seat faces: musicians face the conductor, the conductor faces the band
 export function facing(seat) {
   if (!seat) return [0, -1];
@@ -136,14 +141,16 @@ export function placeAll() {
   for (const s of S.seats) if (s.pan) {
     // own instrument: ~40 cm in front of the seat, slightly below the ears
     const own = s === S.listener;
-    set(s.pan, 'position', own ? me.x + 0.4 * fx : s.x, own ? 1.0 : 1.2, own ? me.y + 0.4 * fz : s.y);
+    const [x, y, z] = own ? [me.x + 0.4 * fx, 1.0, me.y + 0.4 * fz] : [s.x, 1.2, s.y];
+    set(s.pan, 'position', x, y, z);
+    s.prop.delayTime.setTargetAtTime(Math.hypot(x - me.x, y - 1.2, z - me.y) / 343, ctx.currentTime, 0.05); // speed of sound
     // own instrument stays omni: a player hears it all around, and it must dominate
     const rad = S.directivity && !own && radiation(s.part, facing(s));
     if (rad) set(s.pan, 'orientation', ...rad.dir);
     Object.assign(s.pan, rad ? { coneInnerAngle: rad.inner, coneOuterAngle: rad.outer, coneOuterGain: rad.gain } : { coneInnerAngle: 360, coneOuterAngle: 360, coneOuterGain: 1 });
   }
 }
-export function sitAt(seat) { S.listener = seat; placeAll(); } // null = conductor
+export function sitAt(seat) { S.listener = seat; placeAll(); } // null = conductor, AUDIENCE = the hall
 function set(o, k, x, y, z) { if (o[k + 'X']) { o[k + 'X'].value = x; o[k + 'Y'].value = y; o[k + 'Z'].value = z; } else o['set' + k[0].toUpperCase() + k.slice(1)](x, y, z); }
 
 // --- layout --------------------------------------------------------------
@@ -153,8 +160,8 @@ export function layout() { // rebuild seats from part counts; chairs the user mo
   const prev = new Map(S.seats.map(s => [key(s), s]));
   const list = arrange(S.parts, S.project?.preset);
   for (const s of list) { const o = prev.get(key(s)); if (o && o.moved) Object.assign(s, { x: o.x, y: o.y, moved: true }); }
-  const was = S.listener && key(S.listener);
-  S.seats = list; S.listener = S.seats.find(s => key(s) === was) || null;
+  const was = S.listener?.part && key(S.listener);
+  S.seats = list; S.listener = S.listener === AUDIENCE ? AUDIENCE : S.seats.find(s => key(s) === was) || null;
 }
 
 // --- project file --------------------------------------------------------

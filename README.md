@@ -3,7 +3,7 @@
 Listen to a MuseScore score from inside the orchestra, in virtual reality.
 
 Pick a piece (`.mscz`), seat the musicians on a plan, and hear the orchestra in spatial audio in the headset:
-from the conductor's podium, or from any musician's chair.
+from the conductor's podium, from any musician's chair, or from a seat in the hall to compare with what the audience hears.
 
 ![The headset view from the conductor's podium: the orchestra in a symphonic seating, the full score open on the stand with the notes being played lit](docs/headset.png)
 
@@ -51,7 +51,7 @@ that is how the Quest receives the piece.
    The Quest loads the piece by itself, even while already in VR. The play / pause / stop buttons control playback
    in the headset.
 5. In the headset, "Enter VR". With your hands (or the controllers):
-   point at a musician and pinch to take their seat, at the podium to go back to the conductor.
+   point at a musician and pinch to take their seat, at the podium to go back to the conductor, at the red seat in the hall to listen as the audience.
    Touch the panel on your right with a finger: play / pause, stop, ±10 s, previous / next seat,
    volume, time bar, ✕ to leave VR.
 

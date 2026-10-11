@@ -23,7 +23,7 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-import { S, ctx, play, pause, stop, seek, setVolume, MAXVOL, now, meter, sitAt, setHead, placeAll, facing, seatName, openProject, projectFromUrl, file as entry } from './engine.js';
+import { S, ctx, play, pause, stop, seek, setVolume, MAXVOL, now, meter, sitAt, setHead, placeAll, facing, seatName, AUDIENCE, openProject, projectFromUrl, file as entry } from './engine.js';
 import { Sheet } from './stands.js';
 import { t, lang } from './i18n.js';
 const tr = (key, ...a) => t(navigator.language, key, ...a);
@@ -43,6 +43,8 @@ const band = new THREE.Group(), stands = new THREE.Group(); scene.add(band, stan
 let sheets = []; // one per score, shared by the stands showing it
 const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.15, 24), new THREE.MeshStandardMaterial({ color: 0x888888 }));
 podium.position.y = 0.075; scene.add(podium);
+const stalls = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a2a2a })); // the audience's seat
+stalls.position.set(AUDIENCE.x, 0.225, AUDIENCE.y); scene.add(stalls);
 const cube = new THREE.BoxGeometry(0.5, 0.5, 0.5);
 
 function label(text) {
@@ -102,7 +104,7 @@ function drawPanel() {
   g.textAlign = 'center'; g.textBaseline = 'middle';
   ['■', '−10', S.playing ? '❚❚' : '▶', '+10', '✕'].forEach((b, i) => { g.font = i % 2 ? '36px system-ui' : '50px system-ui'; g.fillStyle = i === 4 ? '#ff7b72' : '#e4e6eb'; g.fillText(b, 51 + i * 102.4, 48); });
   g.fillStyle = '#e4e6eb'; g.font = '40px system-ui'; g.fillText('◀', 48, 128); g.fillText('▶', 464, 128);
-  g.font = '28px system-ui'; g.fillText(S.listener ? seatName(S.listener) : tr('conductorSeat'), 256, 128, 320);
+  g.font = '28px system-ui'; g.fillText(S.listener === AUDIENCE ? tr('audienceSeat') : S.listener ? seatName(S.listener) : tr('conductorSeat'), 256, 128, 320);
   g.font = '44px system-ui'; g.fillText('−', 48, 196); g.fillText('+', 464, 196);
   g.fillStyle = '#2a2e37'; g.fillRect(BAR[0], 190, BAR[1] - BAR[0], 12); g.fillStyle = '#3ecf8e'; g.fillRect(BAR[0], 190, (BAR[1] - BAR[0]) * S.volume / MAXVOL, 12);
   g.fillStyle = '#8b909c'; g.font = '22px system-ui'; g.fillText(`${tr('volume')} ${Math.round(S.volume * 100)} %`, 256, 222);
@@ -114,15 +116,15 @@ function pressPanel({ x, y }) { // uv: (0,0) bottom left
   const cx = x * 512, cy = (1 - y) * 320, clamp = v => Math.max(0, Math.min(1, v));
   if (cy > 240) return seek(clamp((cx - 24) / 464) * S.duration);
   if (cy > 164) return setVolume(cx < BAR[0] ? S.volume - 0.1 : cx > BAR[1] ? S.volume + 0.1 : clamp((cx - BAR[0]) / (BAR[1] - BAR[0])) * MAXVOL);
-  if (cy > 96) { // places in order: the conductor, then every chair
+  if (cy > 96) { // places in order: the hall, the conductor, then every chair
     if (cx > BAR[0] && cx < BAR[1]) return;
-    const places = [null, ...S.seats], k = places.indexOf(S.listener) + (cx < 256 ? -1 : 1);
+    const places = [AUDIENCE, null, ...S.seats], k = places.indexOf(S.listener) + (cx < 256 ? -1 : 1);
     return teleport(places[(k + places.length) % places.length]);
   }
   [stop, () => seek(Math.max(0, now() - 10)), () => S.playing ? pause() : play(), () => seek(Math.min(S.duration, now() + 10)), () => renderer.xr.getSession()?.end()][Math.min(4, Math.floor(x * 5))]();
 }
 
-// hands or controllers: pinch / trigger on a cube = sit there, on the podium = conductor, on the panel = transport; grip = play/pause
+// hands or controllers: pinch / trigger on a cube = sit there, on the podium = conductor, on the red seat = audience, on the panel = transport; grip = play/pause
 const ray = new THREE.Raycaster(), tmp = new THREE.Matrix4(), hands = new XRHandModelFactory();
 for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
@@ -130,9 +132,9 @@ for (let i = 0; i < 2; i++) {
   c.addEventListener('select', () => {
     tmp.identity().extractRotation(c.matrixWorld);
     ray.ray.origin.setFromMatrixPosition(c.matrixWorld); ray.ray.direction.set(0, 0, -1).applyMatrix4(tmp);
-    const hit = ray.intersectObjects([panel, ...band.children, podium], false)[0];
+    const hit = ray.intersectObjects([panel, ...band.children, podium, stalls], false)[0];
     if (hit?.object === panel) pressPanel(hit.uv);
-    else if (hit) teleport(hit.object === podium ? null : hit.object.userData.seat);
+    else if (hit) teleport(hit.object === podium ? null : hit.object === stalls ? AUDIENCE : hit.object.userData.seat);
   });
   c.addEventListener('squeeze', () => S.playing ? pause() : play());
   rig.add(c);
@@ -159,7 +161,7 @@ renderer.setAnimationLoop(() => {
     cam.getWorldPosition(head); cam.getWorldDirection(fwd); up.set(0, 1, 0).applyQuaternion(cam.getWorldQuaternion(q));
     setHead(head.x, head.y, head.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z);
     poke();
-  } else { // flat preview: eyes of a seated player, or of the standing conductor
+  } else { // flat preview: eyes of a seated player or listener, or of the standing conductor
     const c = renderer.domElement; if (c.width !== c.clientWidth) { renderer.setSize(c.clientWidth, c.clientHeight, false); camera.aspect = c.clientWidth / c.clientHeight; camera.updateProjectionMatrix(); }
     camera.position.set(0, S.listener ? 1.2 : 1.65, 0); camera.rotation.x = -0.3;
   }
