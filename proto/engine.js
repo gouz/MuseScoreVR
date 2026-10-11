@@ -5,11 +5,19 @@ import { arrange, radiation } from './layout.js';
 
 export const ctx = new AudioContext({ sampleRate: 44100 });
 // mutable state the pages read; change it through the functions below
-export const S = { project: null, parts: [], seats: [], listener: null, playing: false, duration: 0, sections: 'decor', reverb: 0.35, directivity: true, room: null, headTracked: false };
+export const S = { project: null, parts: [], seats: [], listener: null, playing: false, volume: 1, duration: 0, sections: 'decor', reverb: 0.35, directivity: true, room: null, headTracked: false };
 let zip = null, startAt = null, offset = 0, CHUNK = 10;
 
 // --- audio graph ---------------------------------------------------------
 const master = ctx.createGain(); master.connect(ctx.destination);
+export const MAXVOL = 2; // up to +6 dB: MuseSounds renders are not loud
+export function setVolume(v) { // 0..MAXVOL, remembered on this headset
+  S.volume = Math.round(Math.max(0, Math.min(MAXVOL, v)) * 100) / 100;
+  master.gain.setTargetAtTime(S.volume, ctx.currentTime, 0.05); // smooth, no click
+  try { localStorage.volume = S.volume; } catch {}
+}
+let saved = 1; try { saved = parseFloat(localStorage.volume); } catch {}
+setVolume(Number.isFinite(saved) ? saved : 1);
 const revSend = ctx.createGain(), revGain = ctx.createGain(); revSend.gain.value = 0.15; revGain.connect(master);
 const synthetic = (() => { // default hall: 2.2 s decaying stereo noise
   const len = 2.2 * ctx.sampleRate, b = ctx.createBuffer(2, len, ctx.sampleRate);

@@ -13,7 +13,7 @@
 <h1>MuseScoreVR</h1>
 <p id="status">En attente d'un morceau envoyé depuis le configurateur…</p>
 <p><small>Ou ouvrir un projet présent sur le casque :</small> <input id="file" type="file" accept=".zip,application/zip"></p>
-<small>Dans le casque, avec les mains ou les manettes : viser + pincer (ou gâchette) un musicien = écouter depuis sa place, le podium = chef · panneau à votre droite, à toucher du doigt ou viser + pincer = lecture / pause, stop, ±10 s, quitter la VR (✕), barre de temps (aussi pilotable depuis MuseScore).</small>
+<small>Dans le casque, avec les mains ou les manettes : viser + pincer (ou gâchette) un musicien = écouter depuis sa place, le podium = chef · panneau à votre droite, à toucher du doigt ou viser + pincer = lecture / pause, stop, ±10 s, quitter la VR (✕), volume, barre de temps (aussi pilotable depuis MuseScore).</small>
 <script type="importmap">{ "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
@@ -23,7 +23,7 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
-import { S, ctx, play, pause, stop, seek, now, meter, sitAt, setHead, placeAll, facing, seatName, openProject, projectFromUrl, file as entry } from './engine.js';
+import { S, ctx, play, pause, stop, seek, setVolume, MAXVOL, now, meter, sitAt, setHead, placeAll, facing, seatName, openProject, projectFromUrl, file as entry } from './engine.js';
 import { Sheet } from './stands.js';
 const status = document.getElementById('status'), file = document.getElementById('file');
 
@@ -82,24 +82,31 @@ function teleport(seat) {
 }
 
 // transport panel at the listener's right hand; a child of the rig, so it follows them from seat to seat.
-// Top row: stop, -10 s, play/pause, +10 s, leave VR; bottom: time bar (trigger on it = go there)
-const pc = document.createElement('canvas'); pc.width = 512; pc.height = 192;
-const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.15), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(pc), transparent: true }));
+// Rows: stop, -10 s, play/pause, +10 s, leave VR · volume (−, bar, +) · time bar (touch = go there)
+const PW = 0.4, PH = 0.2; // metres
+const pc = document.createElement('canvas'); pc.width = 512; pc.height = 256;
+const panel = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(pc), transparent: true }));
 panel.position.set(0.32, 0.95, -0.38); panel.rotation.set(-0.7, -0.6, 0, 'YXZ'); rig.add(panel); // tilted towards the listener
+const BAR = [96, 416]; // volume bar, canvas x
 let drawn = '';
 function drawPanel() {
-  const t = now(), key = `${S.playing}:${Math.floor(t)}`;
+  const t = now(), key = `${S.playing}:${Math.floor(t)}:${S.volume}`;
   if (key === drawn) return; drawn = key;
   const g = pc.getContext('2d'), mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-  g.clearRect(0, 0, 512, 192); g.fillStyle = 'rgba(25,28,34,0.92)'; g.beginPath(); g.roundRect(0, 0, 512, 192, 24); g.fill();
-  g.fillStyle = '#e4e6eb'; g.font = '56px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  ['■', '−10', S.playing ? '❚❚' : '▶', '+10', '✕'].forEach((b, i) => { g.font = i % 2 ? '36px system-ui' : '50px system-ui'; g.fillStyle = i === 4 ? '#ff7b72' : '#e4e6eb'; g.fillText(b, 51 + i * 102.4, 62); });
-  g.fillStyle = '#2a2e37'; g.fillRect(24, 132, 464, 12); g.fillStyle = '#4f8cff'; g.fillRect(24, 132, 464 * Math.min(1, t / (S.duration || 1)), 12);
-  g.fillStyle = '#8b909c'; g.font = '26px system-ui'; g.fillText(`${mmss(t)} / ${mmss(S.duration)}`, 256, 172);
+  g.clearRect(0, 0, 512, 256); g.fillStyle = 'rgba(25,28,34,0.92)'; g.beginPath(); g.roundRect(0, 0, 512, 256, 24); g.fill();
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  ['■', '−10', S.playing ? '❚❚' : '▶', '+10', '✕'].forEach((b, i) => { g.font = i % 2 ? '36px system-ui' : '50px system-ui'; g.fillStyle = i === 4 ? '#ff7b72' : '#e4e6eb'; g.fillText(b, 51 + i * 102.4, 52); });
+  g.fillStyle = '#e4e6eb'; g.font = '44px system-ui'; g.fillText('−', 48, 136); g.fillText('+', 464, 136);
+  g.fillStyle = '#2a2e37'; g.fillRect(BAR[0], 130, BAR[1] - BAR[0], 12); g.fillStyle = '#3ecf8e'; g.fillRect(BAR[0], 130, (BAR[1] - BAR[0]) * S.volume / MAXVOL, 12);
+  g.fillStyle = '#8b909c'; g.font = '22px system-ui'; g.fillText(`volume ${Math.round(S.volume * 100)} %`, 256, 164);
+  g.fillStyle = '#2a2e37'; g.fillRect(24, 200, 464, 12); g.fillStyle = '#4f8cff'; g.fillRect(24, 200, 464 * Math.min(1, t / (S.duration || 1)), 12);
+  g.fillStyle = '#8b909c'; g.font = '22px system-ui'; g.fillText(`${mmss(t)} / ${mmss(S.duration)}`, 256, 236);
   panel.material.map.needsUpdate = true;
 }
 function pressPanel({ x, y }) { // uv: (0,0) bottom left
-  if (y < 0.33) return seek(Math.max(0, Math.min(1, (x * 512 - 24) / 464)) * S.duration);
+  const cx = x * 512, cy = (1 - y) * 256, clamp = v => Math.max(0, Math.min(1, v));
+  if (cy > 184) return seek(clamp((cx - 24) / 464) * S.duration);
+  if (cy > 104) return setVolume(cx < BAR[0] ? S.volume - 0.1 : cx > BAR[1] ? S.volume + 0.1 : clamp((cx - BAR[0]) / (BAR[1] - BAR[0])) * MAXVOL);
   [stop, () => seek(Math.max(0, now() - 10)), () => S.playing ? pause() : play(), () => seek(Math.min(S.duration, now() + 10)), () => renderer.xr.getSession()?.end()][Math.min(4, Math.floor(x * 5))]();
 }
 
@@ -126,8 +133,8 @@ function poke() {
     const j = renderer.xr.getHand(i).joints['index-finger-tip'];
     if (!j?.visible) { touching[i] = false; continue; }
     panel.worldToLocal(j.getWorldPosition(tip));
-    const on = Math.abs(tip.z) < 0.015 && Math.abs(tip.x) < 0.2 && Math.abs(tip.y) < 0.075;
-    if (on && !touching[i]) pressPanel({ x: tip.x / 0.4 + 0.5, y: tip.y / 0.15 + 0.5 });
+    const on = Math.abs(tip.z) < 0.015 && Math.abs(tip.x) < PW / 2 && Math.abs(tip.y) < PH / 2;
+    if (on && !touching[i]) pressPanel({ x: tip.x / PW + 0.5, y: tip.y / PH + 0.5 });
     touching[i] = on;
   }
 }
