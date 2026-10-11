@@ -10,6 +10,8 @@ en son spatialisé : depuis le podium du chef, ou depuis la chaise de n'importe 
 - **Configurateur** (PC) : nombre de musiciens par partie, placement par glisser-déposer, réglages du rendu, aperçu d'écoute.
 - **Lecteur** (casque, testé sur Meta Quest 3) : rendu seul. On écoute, on se met en pause, on change de place.
   Les musiciens (des cubes colorés par famille) s'illuminent quand ils jouent.
+- **Pupitres** : chaque musicien a sa partie séparée sur son pupitre, le chef a le conducteur.
+  Les pages tournent toutes seules, et les notes s'allument pendant qu'elles sonnent.
 
 ## Prérequis
 
@@ -25,6 +27,7 @@ en son spatialisé : depuis le podium du chef, ou depuis la chaise de n'importe 
 ```sh
 # 1. Rendre un projet depuis une partition enregistrée avec MuseScore 4 (~30 s par partie)
 #    (un fichier MuseScore 3 doit d'abord être ouvert puis enregistré dans MuseScore 4)
+#    Pour les pupitres, générer les parties séparées dans MuseScore (bouton « Parties ») avant d'enregistrer.
 bun run stems partition.mscz proto/projects/mon-morceau.zip
 
 # 2. Créer une fois le certificat local (le Quest exige HTTPS pour la VR)
@@ -32,13 +35,13 @@ mkdir -p .cert && openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   -keyout .cert/key.pem -out .cert/cert.pem -subj "/CN=musescorevr" \
   -addext "subjectAltName=IP:<ip-du-pc>,DNS:localhost"
 
-# 3. Servir l'application sur le réseau local
-bun run serve
+# 3. Servir l'application sur le réseau local et ouvrir le configurateur
+bun start            # (bun run serve : le serveur seul)
 ```
 
 - **Sur le Quest** : ouvrir `https://<ip-du-pc>:8443/` (accepter l'avertissement de certificat) et le laisser ouvert.
   Le casque attend qu'un morceau lui soit envoyé.
-- **Sur le PC** : `https://localhost:8443/config.html`, ouvrir le `.zip`, régler, puis **« Envoyer au casque »**.
+- **Sur le PC** : le configurateur (`https://localhost:8443/config.html`, ouvert par `bun start`), ouvrir le `.zip`, régler, puis **« Envoyer au casque »**.
   Le Quest charge le morceau tout seul, même déjà en VR ; « Enregistrer le projet » garde la configuration dans un fichier.
   Les boutons « Casque : ▶︎ ❚❚ ■ » lancent, mettent en pause ou arrêtent la lecture dans le casque.
 - Dans le casque, « Enter VR ».
@@ -52,6 +55,8 @@ Un `.zip` **non compressé**, que le navigateur lit morceau par morceau sans le 
 project.json        titre, parties (famille, rang, nombre de musiciens), sièges, réglages
 <partie>/<n>.flac   tranches mono de 10 s, sans réverbération (les tranches silencieuses sont omises)
 room.wav|flac       optionnel : réponse impulsionnelle de la salle choisie dans le configurateur
+scores/full/        conducteur : pages en SVG (<n>.svg) + sheet.json (tournes de page, instant de chaque note)
+scores/<partie>/    partie séparée, même format
 ```
 
 Sans `room.*`, une réverbération synthétique est utilisée. Des réponses impulsionnelles de vraies salles se trouvent
@@ -65,10 +70,12 @@ quelle que soit la durée du morceau.
 
 ```
 tools/stems.js        .mscz → projet (rendu MuseScore en ligne de commande, une partie à la fois en solo)
+tools/sheet.js        pages SVG + positions temporelles MuseScore (.spos) → tournes de page et instant de chaque note
 tools/serve.js        serveur HTTPS local + relais configurateur → casques (WebSocket)
 proto/config.html     configurateur (PC)
 proto/index.html      lecteur VR (casque)
 proto/engine.js       commun : ouverture/enregistrement de projet, audio spatial en flux, niveaux
+proto/stands.js       pupitres : partition ouverte comme un livre, notes allumées pendant qu'elles sonnent
 proto/layout.js       placement des familles en blocs, rayonnement des instruments
 proto/zip.js          zip : écriture non compressée, lecture non compressée et deflate (.mscz)
 ```

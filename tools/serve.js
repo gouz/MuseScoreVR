@@ -1,6 +1,6 @@
 // Serve proto/ over HTTPS (the Quest needs it for WebXR) and relay projects from the configurator to headsets.
 //
-// usage: bun tools/serve.js   (then open https://<pc-ip>:8443 on the Quest and accept the certificate warning)
+// usage: bun tools/serve.js [--open]   (--open: also opens the configurator on this PC; then open https://<pc-ip>:8443 on the Quest and accept the certificate warning)
 // Needs .cert/cert.pem and .cert/key.pem (self-signed, see README).
 //   POST /api/project   configurator sends a project zip; every connected headset is told to load it
 //   GET  /api/project   the last project sent
@@ -46,3 +46,7 @@ const server = Bun.serve({
   },
 });
 console.log(`https://0.0.0.0:${server.port}`);
+if (process.argv.includes('--open')) { // configurator in this PC's browser
+  const url = `https://localhost:${server.port}/config.html`;
+  Bun.spawn({ darwin: ['open', url], win32: ['cmd', '/c', 'start', '', url] }[process.platform] ?? ['xdg-open', url]);
+}

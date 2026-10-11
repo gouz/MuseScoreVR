@@ -6,6 +6,7 @@
   "scripts": {
     "stems": "bun tools/stems.js",
     "serve": "bun tools/serve.js",
+    "start": "bun tools/serve.js --open",
     "test": "bun test"
   }
 }

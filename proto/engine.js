@@ -183,6 +183,7 @@ export async function saveProject() { // -> Blob; audio entries are referenced f
   files.push({ name: 'project.json', crc: crc32(json), data: new Blob([json]) });
   return writeZip(files);
 }
+export const file = name => zip.get(name).blob(); // any entry of the open project (scores…)
 // ?project=projects/x.zip loads a project served next to the page
 export async function projectFromUrl() {
   const url = new URLSearchParams(location.search).get('project');
