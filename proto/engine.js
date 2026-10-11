@@ -159,7 +159,7 @@ export function layout() { // rebuild seats from part counts; chairs the user mo
 export async function openProject(file) {
   stop(); cache.clear();
   zip = await readZip(file);
-  if (!zip.has('project.json')) throw new Error('project.json absent du zip');
+  if (!zip.has('project.json')) throw new Error('project.json missing from the zip');
   const project = S.project = JSON.parse(await (await zip.get('project.json').blob()).text());
   S.parts = project.parts; S.duration = project.duration; CHUNK = project.chunk;
   S.parts.forEach(p => p.count ??= 1);
@@ -182,6 +182,6 @@ export async function projectFromUrl() {
   const url = new URLSearchParams(location.search).get('project');
   if (!url) return null;
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url} : ${r.status}`);
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.blob();
 }

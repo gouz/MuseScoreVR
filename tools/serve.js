@@ -45,8 +45,8 @@ const lan = Bun.serve({
   tls: { cert: Bun.file(join(certs, 'cert.pem')), key: Bun.file(join(certs, 'key.pem')) },
   async fetch(req, server) {
     const path = decodeURIComponent(new URL(req.url).pathname);
-    if (path === '/api/events') return server.upgrade(req) ? undefined : new Response('WebSocket attendu', { status: 400 });
-    if (path === '/api/project') return current ? new Response(current, { headers: { 'content-type': 'application/zip' } }) : new Response('Aucun projet', { status: 404 });
+    if (path === '/api/events') return server.upgrade(req) ? undefined : new Response('WebSocket expected', { status: 400 });
+    if (path === '/api/project') return current ? new Response(current, { headers: { 'content-type': 'application/zip' } }) : new Response('No project', { status: 404 });
     const file = resolve(web, '.' + (path.endsWith('/') ? path + 'index.html' : path));
     if (!file.startsWith(web + sep)) return new Response('Forbidden', { status: 403 }); // seen from the network: stay inside the web folder
     const f = Bun.file(file);
@@ -60,7 +60,7 @@ const lan = Bun.serve({
 const headsets = () => lan.subscriberCount('headsets');
 
 const readMeta = async file => JSON.parse(await (await (await readZip(Bun.file(file))).get('project.json').blob()).text());
-const slug = name => name.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().replace(/\s+/g, '-').toLowerCase() || 'partition';
+const slug = name => name.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().replace(/\s+/g, '-').toLowerCase() || 'score';
 
 // MuseScore's recent files, most recent first: the score open in MuseScore is there once it has been saved
 const RECENT = join({ darwin: join(homedir(), 'Library/Application Support'), win32: process.env.LOCALAPPDATA ?? '' }[process.platform]
@@ -124,7 +124,7 @@ Bun.serve({
       }
       if (path === '/api/control' && req.method === 'POST') {
         const { cmd } = await body();
-        if (!['play', 'pause', 'stop'].includes(cmd)) return new Response('Commande inconnue', { status: 400 });
+        if (!['play', 'pause', 'stop'].includes(cmd)) return new Response('Unknown command', { status: 400 });
         lan.publish('headsets', JSON.stringify({ cmd })); return Response.json({ headsets: headsets() });
       }
       return new Response('Not found', { status: 404 });
@@ -134,4 +134,4 @@ Bun.serve({
 
 // started by the plugin: stop with it. MuseScore holds our stdin open; it closes when MuseScore (or the plugin) goes away.
 if (plugin) { process.stdin.on('end', () => process.exit(0)); process.stdin.on('close', () => process.exit(0)); process.stdin.resume(); }
-console.log(`casque : ${ips.map(ip => `https://${ip}:${lan.port}/`).join(' ')} · plugin : http://127.0.0.1:8480`);
+console.log(`headset: ${ips.map(ip => `https://${ip}:${lan.port}/`).join(' ')} · plugin: http://127.0.0.1:8480`);

@@ -6,13 +6,13 @@
 export function wavToMono(buf, rate = 44100) {
   const v = new DataView(buf.buffer ?? buf, buf.byteOffset ?? 0, buf.byteLength);
   const tag = o => String.fromCharCode(...new Uint8Array(v.buffer, v.byteOffset + o, 4));
-  if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('pas un fichier WAV');
+  if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('not a WAV file');
   let fmt = null, data = null;
   for (let o = 12; o + 8 <= v.byteLength; o += 8 + v.getUint32(o + 4, true) + (v.getUint32(o + 4, true) & 1)) {
     if (tag(o) === 'fmt ') fmt = o + 8;
     if (tag(o) === 'data') { data = [o + 8, Math.min(v.getUint32(o + 4, true), v.byteLength - o - 8)]; break; }
   }
-  if (fmt === null || !data) throw new Error('WAV incomplet');
+  if (fmt === null || !data) throw new Error('incomplete WAV');
   let format = v.getUint16(fmt, true);
   const channels = v.getUint16(fmt + 2, true), srcRate = v.getUint32(fmt + 4, true), bits = v.getUint16(fmt + 14, true);
   if (format === 0xfffe) format = v.getUint16(fmt + 24, true); // WAVE_FORMAT_EXTENSIBLE: sub-format GUID starts with the format code
@@ -22,7 +22,7 @@ export function wavToMono(buf, rate = 44100) {
     : format === 1 && bits === 24 ? o => ((v.getUint8(o) | v.getUint8(o + 1) << 8 | v.getInt8(o + 2) << 16)) / 8388608
     : format === 1 && bits === 32 ? o => v.getInt32(o, true) / 2147483648
     : null;
-  if (!read) throw new Error(`format WAV non géré (${format}, ${bits} bits)`);
+  if (!read) throw new Error(`unsupported WAV format (${format}, ${bits} bits)`);
   const mono = new Float32Array(frames);
   for (let i = 0, o = data[0]; i < frames; i++) {
     let s = 0; for (let c = 0; c < channels; c++, o += bytes) s += read(o);

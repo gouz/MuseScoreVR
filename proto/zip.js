@@ -11,16 +11,16 @@ export async function readZip(file) {
   const tail = new DataView(await file.slice(file.size - tailLen).arrayBuffer());
   let e = tailLen - 22;
   while (e >= 0 && tail.getUint32(e, true) !== 0x06054b50) e--;
-  if (e < 0) throw new Error('pas un fichier zip');
+  if (e < 0) throw new Error('not a zip file');
   const count = tail.getUint16(e + 10, true), cdSize = tail.getUint32(e + 12, true), cdOff = tail.getUint32(e + 16, true);
   const cd = new DataView(await file.slice(cdOff, cdOff + cdSize).arrayBuffer());
   const entries = new Map(), utf8 = new TextDecoder();
   for (let i = 0, p = 0; i < count; i++) {
-    if (cd.getUint32(p, true) !== 0x02014b50) throw new Error('zip corrompu');
+    if (cd.getUint32(p, true) !== 0x02014b50) throw new Error('corrupt zip');
     const method = cd.getUint16(p + 10, true), crc = cd.getUint32(p + 16, true), size = cd.getUint32(p + 20, true);
     const nameLen = cd.getUint16(p + 28, true), extraLen = cd.getUint16(p + 30, true), commentLen = cd.getUint16(p + 32, true);
     const off = cd.getUint32(p + 42, true), name = utf8.decode(new Uint8Array(cd.buffer, p + 46, nameLen));
-    if (method !== 0 && method !== 8) throw new Error(`${name} : compression ${method} non gérée`);
+    if (method !== 0 && method !== 8) throw new Error(`${name}: unsupported compression ${method}`);
     entries.set(name, {
       crc, size,
       async blob() { // local header's name/extra lengths can differ from the central directory's

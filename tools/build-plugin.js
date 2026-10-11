@@ -41,7 +41,7 @@ for (const [name, list] of Object.entries(targets)) {
   if (name.includes('macos') && Bun.which('codesign')) await $`codesign --force -s - ${join(out, 'bin', name)}`.quiet(); // ad-hoc: Apple silicon runs nothing unsigned
   console.log('bin/' + name);
 }
-console.log(`plugin prêt : ${out}`);
+console.log(`plugin ready: ${out}`);
 
 const i = process.argv.indexOf('--release'), version = i > 0 ? process.argv[i + 1] : null;
 if (version) {
