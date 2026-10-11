@@ -1,0 +1,11 @@
+{
+  "name": "musescorevr",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "stems": "bun tools/stems.js",
+    "serve": "bun tools/serve.js",
+    "test": "bun test"
+  }
+}

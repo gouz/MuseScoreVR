@@ -1,6 +1,9 @@
-// node proto/layout.test.mjs
-import { arrange, radiation } from './layout.js';
+// bun test
+import { test } from 'bun:test';
 import assert from 'node:assert';
+import { arrange, radiation } from './layout.js';
+
+test('family blocks and instrument radiation', () => {
 
 const fam = (family, familyRank, ...counts) => counts.map((count, i) => ({ id: family + i, family, familyRank, count }));
 const parts = [...fam('trumpets', 6, 3, 3), ...fam('flutes', 0, 1, 1), ...fam('clarinets', 2, 1, 1, 1), ...fam('saxophones', 3, 1, 1, 1, 1), ...fam('drums', 13, 1)];
@@ -35,4 +38,4 @@ const h = radiation({ instrument: 'horn', family: 'horns' }, [0, 1]).dir; // pla
 assert.ok(h[0] < 0 && h[2] < 0, 'horn bell back-right');
 assert.ok(radiation({ family: 'tubas' }, [0, 1]).dir[1] > 0.9, 'tuba bell up');
 assert.equal(radiation({ family: 'drums' }, [0, 1]), null);
-console.log('ok');
+});

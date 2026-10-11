@@ -1,4 +1,4 @@
-# musicVR
+# MuseScoreVR
 
 Écouter une partition MuseScore depuis l'intérieur de l'orchestre, en réalité virtuelle.
 
@@ -14,23 +14,23 @@ en son spatialisé : depuis le podium du chef, ou depuis la chaise de n'importe 
 ## Prérequis
 
 - [MuseScore 4](https://musescore.org) et les MuseSounds installés via Muse Hub
-- macOS pour l'instant : `tools/stems.py` utilise `afconvert` et le chemin de l'application MuseScore
-- Python 3, Node.js (pour les tests uniquement)
+- [Bun](https://bun.sh) ≥ 1.3
+- macOS pour l'instant : `tools/stems.js` utilise `afconvert` (le chemin de MuseScore se change avec la variable `MSCORE`)
 - Un navigateur avec WebXR (navigateur du Quest), et Chrome ou Edge sur le PC
 
 ## Utilisation
 
 ```sh
 # 1. Rendre un projet depuis une partition (~30 s par partie)
-python3 tools/stems.py partition.mscz proto/projects/mon-morceau.zip
+bun run stems partition.mscz proto/projects/mon-morceau.zip
 
 # 2. Créer une fois le certificat local (le Quest exige HTTPS pour la VR)
 mkdir -p .cert && openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-  -keyout .cert/key.pem -out .cert/cert.pem -subj "/CN=musicvr" \
+  -keyout .cert/key.pem -out .cert/cert.pem -subj "/CN=musescorevr" \
   -addext "subjectAltName=IP:<ip-du-pc>,DNS:localhost"
 
 # 3. Servir l'application sur le réseau local
-python3 tools/serve.py
+bun run serve
 ```
 
 - **Configurer** sur le PC : `https://localhost:8443/config.html`, ouvrir le `.zip`, régler, « Enregistrer le projet ».
@@ -45,7 +45,11 @@ Un `.zip` **non compressé**, que le navigateur lit morceau par morceau sans le 
 ```
 project.json        titre, parties (famille, rang, nombre de musiciens), sièges, réglages
 <partie>/<n>.flac   tranches mono de 10 s, sans réverbération (les tranches silencieuses sont omises)
+room.wav|flac       optionnel : réponse impulsionnelle de la salle choisie dans le configurateur
 ```
+
+Sans `room.*`, une réverbération synthétique est utilisée. Des réponses impulsionnelles de vraies salles se trouvent
+par exemple dans la bibliothèque OpenAIR ; chacune a sa licence, vérifiez-la avant de partager un projet.
 
 Les familles d'instruments et leur ordre viennent du bloc `<Order>` de la partition.
 Pendant la lecture, seules les tranches des ~12 prochaines secondes sont décodées : la mémoire reste stable
@@ -54,20 +58,19 @@ quelle que soit la durée du morceau.
 ## Structure
 
 ```
-tools/stems.py        .mscz → projet (rendu MuseScore en ligne de commande, une partie à la fois en solo)
-tools/serve.py        serveur HTTPS local
+tools/stems.js        .mscz → projet (rendu MuseScore en ligne de commande, une partie à la fois en solo)
+tools/serve.js        serveur HTTPS local
 proto/config.html     configurateur (PC)
 proto/index.html      lecteur VR (casque)
 proto/engine.js       commun : ouverture/enregistrement de projet, audio spatial en flux, niveaux
 proto/layout.js       placement des familles en blocs, rayonnement des instruments
-proto/zip.js          lecture/écriture de zip non compressé
+proto/zip.js          zip : écriture non compressée, lecture non compressée et deflate (.mscz)
 ```
 
 ## Tests
 
 ```sh
-node proto/layout.test.mjs
-python3 tools/test_zip.py
+bun test
 ```
 
 ## MuseSounds et droits

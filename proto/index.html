@@ -2,14 +2,14 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>musicVR</title>
+<title>MuseScoreVR</title>
 <style>
   body { margin: 0; font: 18px system-ui, sans-serif; background: #111; color: #ddd; padding: 24px; }
   small { color: #888; }
 </style>
 </head>
 <body>
-<h1>musicVR</h1>
+<h1>MuseScoreVR</h1>
 <p><input id="file" type="file" accept=".zip,application/zip"></p>
 <p id="status">Ouvrez un projet préparé dans le configurateur.</p>
 <small>Dans le casque : gâchette sur un musicien = écouter depuis sa place · gâchette sur le podium = chef · poignée = lecture / pause.</small>
@@ -94,7 +94,7 @@ renderer.xr.addEventListener('sessionend', () => { S.headTracked = false; pause(
 async function open(blob) {
   status.textContent = 'Ouverture…';
   const project = await openProject(blob);
-  document.title = project.title + ' – musicVR';
+  document.title = project.title + ' – MuseScoreVR';
   build3d(); teleport(null);
   status.textContent = `${project.title} · ${S.seats.length} musiciens — prêt, entrez en VR.`;
   if (!document.getElementById('VRButton')) document.body.append(VRButton.createButton(renderer));

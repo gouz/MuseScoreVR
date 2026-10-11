@@ -1,10 +1,11 @@
-// Minimal ZIP: stored (uncompressed) entries only, no zip64.
-// Project audio is already FLAC, so storing lets us slice entries straight out of the File without loading it.
+// Minimal ZIP, no zip64. Writes stored (uncompressed) entries only: project audio is already FLAC, and storing
+// lets the player slice entries straight out of the File without loading it. Reads stored and deflated entries
+// (a .mscz is deflated).
 
 const CRC = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c; });
 export function crc32(bytes) { let c = ~0; for (const b of bytes) c = CRC[(c ^ b) & 0xff] ^ (c >>> 8); return ~c >>> 0; }
 
-// returns Map name -> { crc, size, blob() }
+// returns Map name -> { crc, size, blob() }; blob() is the uncompressed content
 export async function readZip(file) {
   const tailLen = Math.min(file.size, 22 + 0xffff); // end record + max comment
   const tail = new DataView(await file.slice(file.size - tailLen).arrayBuffer());
@@ -19,13 +20,14 @@ export async function readZip(file) {
     const method = cd.getUint16(p + 10, true), crc = cd.getUint32(p + 16, true), size = cd.getUint32(p + 20, true);
     const nameLen = cd.getUint16(p + 28, true), extraLen = cd.getUint16(p + 30, true), commentLen = cd.getUint16(p + 32, true);
     const off = cd.getUint32(p + 42, true), name = utf8.decode(new Uint8Array(cd.buffer, p + 46, nameLen));
-    if (method !== 0) throw new Error(`${name} est compressé (seul le zip non compressé est géré)`);
+    if (method !== 0 && method !== 8) throw new Error(`${name} : compression ${method} non gérée`);
     entries.set(name, {
       crc, size,
       async blob() { // local header's name/extra lengths can differ from the central directory's
         const h = new DataView(await file.slice(off, off + 30).arrayBuffer());
         const start = off + 30 + h.getUint16(26, true) + h.getUint16(28, true);
-        return file.slice(start, start + size);
+        const raw = file.slice(start, start + size);
+        return method === 8 ? new Response(raw.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob() : raw;
       },
     });
     p += 46 + nameLen + extraLen + commentLen;

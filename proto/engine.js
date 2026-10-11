@@ -5,20 +5,29 @@ import { arrange, radiation } from './layout.js';
 
 export const ctx = new AudioContext({ sampleRate: 44100 });
 // mutable state the pages read; change it through the functions below
-export const S = { project: null, parts: [], seats: [], listener: null, playing: false, duration: 0, sections: 'decor', reverb: 0.35, directivity: true, headTracked: false };
+export const S = { project: null, parts: [], seats: [], listener: null, playing: false, duration: 0, sections: 'decor', reverb: 0.35, directivity: true, room: null, headTracked: false };
 let zip = null, startAt = null, offset = 0, CHUNK = 10;
 
 // --- audio graph ---------------------------------------------------------
 const master = ctx.createGain(); master.connect(ctx.destination);
-const reverb = ctx.createConvolver(), revGain = ctx.createGain();
-reverb.connect(revGain).connect(master);
-reverb.buffer = (() => { // synthetic hall: 2.2 s decaying stereo noise
+const revSend = ctx.createGain(), revGain = ctx.createGain(); revSend.gain.value = 0.15; revGain.connect(master);
+const synthetic = (() => { // default hall: 2.2 s decaying stereo noise
   const len = 2.2 * ctx.sampleRate, b = ctx.createBuffer(2, len, ctx.sampleRate);
   for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-3 * i / len) * 0.25; }
   return b;
 })();
-// ponytail: synthetic IR, swap for a real hall impulse response file when tuning realism
-const revSend = ctx.createGain(); revSend.gain.value = 0.15; revSend.connect(reverb);
+// the room is a convolution with an impulse response; the convolver normalises its level, so any hall fits
+let reverb = null, roomBlob = null;
+function useIR(buffer) { // a fresh node each time: some browsers refuse to change a convolver's buffer
+  reverb?.disconnect(); reverb = new ConvolverNode(ctx, { buffer });
+  revSend.disconnect(); revSend.connect(reverb).connect(revGain);
+}
+useIR(synthetic);
+// blob: an impulse response file (wav, flac…) or null for the synthetic hall; stored in the project on save
+export async function setRoom(blob, name) {
+  useIR(blob ? await ctx.decodeAudioData(await blob.arrayBuffer()) : synthetic);
+  roomBlob = blob; S.room = blob ? name : null;
+}
 export function setReverb(v) { S.reverb = v; revGain.gain.value = v; }
 setReverb(S.reverb);
 
@@ -152,6 +161,7 @@ export async function openProject(file) {
   S.sections = project.sections === 'raw' ? 'raw' : 'decor';
   setReverb(project.reverb ?? 0.35);
   S.directivity = project.directivity ?? true;
+  await setRoom(project.room && zip.has(project.room.file) ? await zip.get(project.room.file).blob() : null, project.room?.name);
   S.seats = []; S.listener = null; layout();
   const saved = new Map((project.seats || []).map(s => [s.part + ':' + s.copy, s]));
   for (const s of S.seats) { const o = saved.get(key(s)); if (o) Object.assign(s, { x: o.x, y: o.y, moved: true }); }
@@ -161,10 +171,15 @@ export async function openProject(file) {
 export async function saveProject() { // -> Blob; audio entries are referenced from the open file, not copied in memory
   const meta = { ...S.project, parts: S.parts.map(({ an, level, hue, ...p }) => p),
     seats: S.seats.map(s => ({ part: s.part.id, copy: s.copy, x: +s.x.toFixed(2), y: +s.y.toFixed(2) })),
-    sections: S.sections, reverb: S.reverb, directivity: S.directivity };
-  const json = new TextEncoder().encode(JSON.stringify(meta, null, 2));
+    sections: S.sections, reverb: S.reverb, directivity: S.directivity, room: null };
   const files = [];
-  for (const [name, e] of zip) if (name !== 'project.json') files.push({ name, crc: e.crc, data: await e.blob() });
+  for (const [name, e] of zip) if (name !== 'project.json' && name !== S.project.room?.file) files.push({ name, crc: e.crc, data: await e.blob() });
+  if (roomBlob) { // the room may come from the open project or a file just picked: either way, write it again
+    const ext = (S.room.match(/\.(wav|flac|ogg|mp3|m4a)$/i)?.[0] ?? '.wav').toLowerCase();
+    meta.room = { file: 'room' + ext, name: S.room };
+    files.push({ name: meta.room.file, crc: crc32(new Uint8Array(await roomBlob.arrayBuffer())), data: roomBlob });
+  }
+  const json = new TextEncoder().encode(JSON.stringify(meta, null, 2)); // after meta.room is known
   files.push({ name: 'project.json', crc: crc32(json), data: new Blob([json]) });
   return writeZip(files);
 }
