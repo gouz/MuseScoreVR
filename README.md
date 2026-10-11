@@ -16,8 +16,11 @@ en son spatialisé : depuis le podium du chef, ou depuis la chaise de n'importe 
 ## Installation
 
 - [MuseScore 4](https://musescore.org) (testé avec 4.7) et les MuseSounds installés via Muse Hub
-- Copier le dossier `plugin/` (assemblé, voir plus bas) dans le dossier des plugins de MuseScore, en le renommant
-  `MuseScoreVR` : `Documents/MuseScore4/Plugins/MuseScoreVR`
+- Télécharger le zip de votre système dans les [releases](https://github.com/gouz/MuseScoreVR/releases)
+  (`MuseScoreVR-<version>-macos.zip`, `-windows.zip` ou `-linux.zip`) et le décompresser dans le dossier des plugins
+  de MuseScore : on obtient `Documents/MuseScore4/Plugins/MuseScoreVR`
+- macOS : le serveur n'est pas notarisé par Apple ; après la décompression, autoriser le dossier une fois dans le Terminal :
+  `xattr -dr com.apple.quarantine ~/Documents/MuseScore4/Plugins/MuseScoreVR`
 - Dans MuseScore : Accueil › Plugins, activer **MuseScoreVR**
 - Sur le Quest : rien à installer, c'est une page web (navigateur du Quest)
 
@@ -35,10 +38,13 @@ c'est par là que le Quest reçoit le morceau.
    rouvrir la même partition est immédiat.
 3. **Sur le Quest** : ouvrir l'adresse affichée en bas de la fenêtre du plugin (`https://<ip-du-pc>:8443/`),
    accepter l'avertissement de certificat, et laisser la page ouverte.
-4. Dans le plugin : régler le nombre de musiciens, les placer, puis **« Envoyer au casque »**.
-   Le Quest charge le morceau tout seul, même déjà en VR. Les boutons ▶ ❚❚ ■ pilotent la lecture dans le casque.
-5. Dans le casque, « Enter VR ».
-   Gâchette sur un musicien : s'asseoir à sa place · gâchette sur le podium : revenir au chef · poignée : lecture / pause.
+4. Dans le plugin : choisir une disposition (ordre de la partition, orchestre symphonique, orchestre d'harmonie,
+   big band), régler le nombre de musiciens, les déplacer si besoin, puis **« Envoyer au casque »**.
+   Le Quest charge le morceau tout seul, même déjà en VR. Les boutons Lecture / Pause / Stop pilotent la lecture dans le casque.
+5. Dans le casque, « Enter VR ». Avec les mains (ou les manettes) :
+   viser un musicien et pincer pour s'asseoir à sa place, le podium pour revenir au chef.
+   Le panneau à votre droite se touche du doigt : lecture / pause, stop, ±10 s, place précédente / suivante,
+   volume, barre de temps, ✕ pour quitter la VR.
 
 Gardez la fenêtre du plugin ouverte pendant l'écoute : la fermer arrête le serveur (le morceau déjà reçu continue de jouer
 dans le casque, mais la télécommande ne répond plus).
@@ -50,13 +56,19 @@ dans le casque, mais la télécommande ne répond plus).
 ```sh
 bun install
 bun run plugin --here   # compile le serveur pour ce système seulement, copie la page du casque dans plugin/
-bun run plugin          # pour macOS (binaire universel), Windows et Linux : à faire avant de distribuer
+bun run plugin          # pour macOS (binaire universel), Windows et Linux
+bun run plugin --release 1.2.0   # + dist/MuseScoreVR-1.2.0-<os>.zip, comme une release
 # pendant le développement, un vrai dossier dont le contenu est lié (MuseScore ne suit pas un dossier lié) :
 mkdir -p ~/Documents/MuseScore4/Plugins/MuseScoreVR
 for f in MuseScoreVR.qml layout.mjs bin web; do ln -sfn "$PWD/plugin/$f" ~/Documents/MuseScore4/Plugins/MuseScoreVR/; done
 bun run serve           # le serveur depuis les sources (le plugin l'utilise s'il tourne déjà)
 bun run stems partition.mscz projet.zip   # le rendu seul, en ligne de commande
 ```
+
+### Publier une version
+
+Pousser un tag `v<version>` (`git tag v1.2.0 && git push origin v1.2.0`) : la CI (`.github/workflows/release.yml`)
+lance les tests, assemble le plugin pour macOS, Windows et Linux, et crée la release GitHub avec un zip par système.
 
 ## Format de projet
 
@@ -85,7 +97,7 @@ tools/serve.js        serveur : rendu, page du casque en HTTPS sur le Wi-Fi, env
 tools/stems.js        .mscz → projet (rendu MuseScore en ligne de commande, une partie à la fois en solo)
 tools/flac.js         lecture du WAV de MuseScore, encodage FLAC (sans ffmpeg)
 tools/sheet.js        pages SVG + positions temporelles MuseScore (.spos) → tournes de page et instant de chaque note
-tools/build-plugin.js assemble plugin/ : serveur compilé par système, page du casque
+tools/build-plugin.js assemble plugin/ : serveur compilé par système, page du casque ; zips de release
 proto/index.html      lecteur VR (casque)
 proto/engine.js       ouverture de projet, audio spatial en flux, niveaux
 proto/stands.js       pupitres : partition ouverte comme un livre, notes allumées pendant qu'elles sonnent

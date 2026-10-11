@@ -11,3 +11,5 @@ plugin/layout.mjs
 # the plugin's certificate and rendered projects
 plugin/data/
 node_modules/
+# release packages (bun run plugin --release <version>)
+dist/

@@ -1,0 +1,25 @@
+# Pushing a tag v<version> builds the plugin for every system and publishes it as a GitHub release.
+# macOS runner: lipo makes the universal macOS server, Bun cross-compiles the Windows and Linux ones.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run plugin --release "${GITHUB_REF_NAME#v}"
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.zip --title "MuseScoreVR $GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
