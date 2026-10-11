@@ -25,23 +25,24 @@ en son spatialisé : depuis le podium du chef, ou depuis la chaise de n'importe 
 ## Utilisation
 
 ```sh
-# 1. Rendre un projet depuis une partition enregistrée avec MuseScore 4 (~30 s par partie)
-#    (un fichier MuseScore 3 doit d'abord être ouvert puis enregistré dans MuseScore 4)
-#    Pour les pupitres, générer les parties séparées dans MuseScore (bouton « Parties ») avant d'enregistrer.
-bun run stems partition.mscz proto/projects/mon-morceau.zip
-
-# 2. Créer une fois le certificat local (le Quest exige HTTPS pour la VR)
+# 1. Créer une fois le certificat local (le Quest exige HTTPS pour la VR)
 mkdir -p .cert && openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   -keyout .cert/key.pem -out .cert/cert.pem -subj "/CN=musescorevr" \
   -addext "subjectAltName=IP:<ip-du-pc>,DNS:localhost"
 
-# 3. Servir l'application sur le réseau local et ouvrir le configurateur
+# 2. Servir l'application sur le réseau local et ouvrir le configurateur
 bun start            # (bun run serve : le serveur seul)
 ```
 
+Une partition `.mscz` ouverte dans le configurateur est rendue par MuseScore sur le PC (~30 s par partie),
+puis enregistrée dans `proto/projects/` et ouverte. Elle doit avoir été enregistrée avec MuseScore 4
+(une partition MuseScore 3 doit d'abord être ouverte puis enregistrée dans MuseScore 4) ;
+pour les pupitres, générer les parties séparées dans MuseScore (bouton « Parties ») avant d'enregistrer.
+Le même rendu existe en ligne de commande : `bun run stems partition.mscz proto/projects/mon-morceau.zip`.
+
 - **Sur le Quest** : ouvrir `https://<ip-du-pc>:8443/` (accepter l'avertissement de certificat) et le laisser ouvert.
   Le casque attend qu'un morceau lui soit envoyé.
-- **Sur le PC** : le configurateur (`https://localhost:8443/config.html`, ouvert par `bun start`), ouvrir le `.zip`, régler, puis **« Envoyer au casque »**.
+- **Sur le PC** : le configurateur (`https://localhost:8443/config.html`, ouvert par `bun start`), ouvrir une partition `.mscz` (ou un projet `.zip` déjà rendu), régler, puis **« Envoyer au casque »**.
   Le Quest charge le morceau tout seul, même déjà en VR ; « Enregistrer le projet » garde la configuration dans un fichier.
   Les boutons « Casque : ▶︎ ❚❚ ■ » lancent, mettent en pause ou arrêtent la lecture dans le casque.
 - Dans le casque, « Enter VR ».

@@ -5,17 +5,23 @@
 //   POST /api/project   configurator sends a project zip; every connected headset is told to load it
 //   GET  /api/project   the last project sent
 //   POST /api/control   {cmd: play|pause|stop} forwarded to every headset
+//   POST /api/import    a .mscz (x-filename header) rendered into proto/projects/<name>.zip; streams progress as JSON lines
 //   WS   /api/events    headsets listen here; on connect they get the current project, if any
 //   WS   /api/events?config   configurators listen here for { headsets: n }, the number of headsets connected
-import { resolve, sep } from 'node:path';
+import { resolve, sep, join } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { render } from './stems.js';
 
 const root = resolve(import.meta.dir, '../proto'), cert = resolve(import.meta.dir, '../.cert');
+let importing = false; // ponytail: one import at a time, MuseScore renders are CPU-bound anyway
 let current = null, version = 0; // ponytail: last project kept in memory only, lost on restart — the configurator just sends it again
 
 const server = Bun.serve({
   port: 8443,
   hostname: '0.0.0.0',
   maxRequestBodySize: 2 ** 31, // projects are a few hundred MB of FLAC
+  idleTimeout: 255, // seconds; an import streams one line per part, ~30 s apart
   tls: { cert: Bun.file(`${cert}/cert.pem`), key: Bun.file(`${cert}/key.pem`) },
   async fetch(req, server) {
     const path = decodeURIComponent(new URL(req.url).pathname);
@@ -30,6 +36,20 @@ const server = Bun.serve({
       if (!['play', 'pause', 'stop'].includes(cmd)) return new Response('Commande inconnue', { status: 400 });
       server.publish('headsets', JSON.stringify({ cmd }));
       return Response.json({ headsets: server.subscriberCount('headsets') });
+    }
+    if (path === '/api/import' && req.method === 'POST') {
+      if (importing) return new Response('Un import est déjà en cours', { status: 409 });
+      // the file name becomes the title; keep only a plain name (it is also used as a path)
+      const name = decodeURIComponent(req.headers.get('x-filename') ?? '').split(/[\\/]/).pop().replace(/\.mscz$/i, '').replace(/[^\p{L}\p{N} _.-]/gu, '').trim() || 'partition';
+      const out = `projects/${name.replace(/\s+/g, '-').toLowerCase()}.zip`;
+      const tmp = await mkdtemp(join(tmpdir(), 'musescorevr-import-')), src = join(tmp, name + '.mscz');
+      await Bun.write(src, await req.arrayBuffer());
+      importing = true;
+      const { readable, writable } = new TransformStream(), w = writable.getWriter(), line = o => w.write(new TextEncoder().encode(JSON.stringify(o) + '\n')).catch(() => {}); // the page may have gone: the render still finishes
+      render(src, resolve(root, out), (msg, done, total) => line({ msg, done, total }))
+        .then(() => line({ project: out }), e => line({ error: e.message }))
+        .finally(() => { importing = false; w.close().catch(() => {}); rm(tmp, { recursive: true, force: true }); });
+      return new Response(readable, { headers: { 'content-type': 'application/x-ndjson' } });
     }
     if (path === '/api/project') return current ? new Response(current, { headers: { 'content-type': 'application/zip' } }) : new Response('Aucun projet', { status: 404 });
 

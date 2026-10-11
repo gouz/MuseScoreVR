@@ -35,7 +35,8 @@ export function families(mscx) {
     .map(([, inst, fid, name]) => [inst, [fid, name, ranks.get(fid) ?? ranks.size]]));
 }
 
-async function main(src, out) {
+// progress(message, done, total): called as parts are rendered (the CLI prints it; the server streams it)
+export async function render(src, out, progress = (msg, i, n) => console.log(`${i}/${n}`, msg)) {
   if (!src || !out) throw new Error('usage: bun tools/stems.js score.mscz project.zip');
   const tmp = await mkdtemp(join(tmpdir(), 'musescorevr-'));
   try {
@@ -52,6 +53,7 @@ async function main(src, out) {
     const project = [], parts = [];
     let duration = 0;
 
+    let done = 0; const steps = names.size + 1; // every part, then the scores
     for (const [pid, name] of names) { // score order (top to bottom), used to break ties within a family
       // solo this part, kill reverb sends -> dry stem
       const settings = JSON.parse(text('audiosettings.json'));
@@ -79,9 +81,10 @@ async function main(src, out) {
       const inst = tracks.get(pid).instrumentId;
       const [family, familyName, familyRank] = fams[inst] ?? [inst, name, Object.keys(fams).length];
       parts.push({ id: pid, name, instrument: inst, family, familyName, familyRank, count: 1, chunks });
-      console.log(pid.padStart(4), name);
+      progress(name, ++done, steps);
     }
 
+    progress('partitions des pupitres', done, steps);
     // music stands: one MuseScore batch run exports every page as SVG plus segment timings, in page layout
     const paged = new Map([...files].map(([n, f]) => [n, n.endsWith('.mscx')
       ? { crc: null, bytes: new TextEncoder().encode(new TextDecoder().decode(f.bytes).replace(/\s*<layoutMode>\w+<\/layoutMode>/, '')) } : f]));
@@ -109,7 +112,7 @@ async function main(src, out) {
     }
     for (const p of parts) if (sheets.has(p.id)) p.sheet = `scores/${p.id}`;
     const missing = parts.filter(p => !p.sheet).map(p => p.name);
-    if (missing.length) console.log(`sans partie séparée (générez les parties dans MuseScore) : ${missing.join(', ')}`);
+    if (missing.length) progress(`sans partie séparée (générez les parties dans MuseScore) : ${missing.join(', ')}`, done, steps);
 
     const meta = { version: 1, title: basename(src, '.mscz').trim(), chunk: CHUNK, duration, sheet: 'scores/full', parts };
     const json = new TextEncoder().encode(JSON.stringify(meta, null, 2));
@@ -120,4 +123,4 @@ async function main(src, out) {
   }
 }
 
-if (import.meta.main) await main(...process.argv.slice(2));
+if (import.meta.main) await render(...process.argv.slice(2, 4));

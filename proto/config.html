@@ -55,13 +55,15 @@
   #toast.show { opacity: 1; }
   #toast.err { border-left-color: var(--err); }
   code { background: #262a33; padding: 1px 5px; border-radius: 4px; }
+  #importing { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); width: min(460px, 90%); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 40px #0008; }
+  #importing progress { width: 100%; accent-color: var(--accent); }
   [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <header>
   <h1>MuseScoreVR <small id="title">configurateur</small></h1>
-  <label class="btn" title="Ouvrir un projet .zip créé par « bun run stems »">Ouvrir…<input id="file" type="file" accept=".zip,application/zip"></label>
+  <label class="btn" title="Ouvrir une partition MuseScore 4 (.mscz) ou un projet (.zip)">Ouvrir…<input id="file" type="file" accept=".mscz,.zip,application/zip"></label>
   <button id="save" disabled title="Télécharger le projet avec sa configuration">Enregistrer</button>
   <span class="grow"></span>
   <button id="send" class="primary" disabled>Envoyer au casque</button>
@@ -96,9 +98,15 @@
 <main>
   <canvas id="c"></canvas>
   <div id="empty">
-    <b>Déposez un projet ici</b>
-    <span>ou <label class="btn">Ouvrir…<input id="file2" type="file" accept=".zip,application/zip"></label></span>
-    <span class="hint">Un projet se crée depuis une partition MuseScore 4 : <code>bun run stems partition.mscz projet.zip</code></span>
+    <b>Déposez une partition MuseScore (.mscz) ou un projet (.zip)</b>
+    <span>ou <label class="btn">Ouvrir…<input id="file2" type="file" accept=".mscz,.zip,application/zip"></label></span>
+    <span class="hint">Une partition est rendue par MuseScore 4 avec les MuseSounds (≈ 30 s par partie), puis s'ouvre ici.<br>
+      Pour les pupitres, générez les parties séparées dans MuseScore avant d'enregistrer la partition.</span>
+  </div>
+  <div id="importing" hidden>
+    <b id="impTitle"></b>
+    <progress id="impBar"></progress>
+    <span id="impMsg" class="hint"></span>
   </div>
   <div id="listen" class="overlay" hidden></div>
   <button id="reset" hidden title="Remettre chaque musicien à sa place automatique">Replacer automatiquement</button>
@@ -256,7 +264,31 @@ async function open(blob) {
   showListen(); refresh(); draw();
   say(`${project.title} ouvert · ${S.parts.length} parties`);
 }
-const openFile = f => f && open(f).catch(fail);
+const openFile = f => f && (/\.mscz$/i.test(f.name) ? importScore(f) : open(f)).catch(fail);
+// a .mscz is rendered by the server (MuseScore + MuseSounds on this PC), which streams its progress, then opened
+async function importScore(f) {
+  const box = $('importing'), bar = $('impBar'), msg = $('impMsg');
+  $('impTitle').textContent = `Import de ${f.name}`; msg.textContent = 'Rendu par MuseScore… (≈ 30 s par partie)';
+  bar.removeAttribute('value'); box.hidden = false; $('empty').hidden = true;
+  try {
+    const r = await fetch('/api/import', { method: 'POST', headers: { 'x-filename': encodeURIComponent(f.name) }, body: f });
+    if (!r.ok) throw new Error(await r.text());
+    let project = null, buf = '';
+    for await (const chunk of r.body.pipeThrough(new TextDecoderStream())) {
+      buf += chunk; const lines = buf.split('\n'); buf = lines.pop();
+      for (const m of lines.map(l => JSON.parse(l))) {
+        if (m.error) throw new Error(m.error);
+        if (m.project) project = m.project;
+        else { bar.max = m.total; bar.value = m.done; msg.textContent = `${m.done} / ${m.total} · ${m.msg}`; }
+      }
+    }
+    if (!project) throw new Error('import interrompu');
+    msg.textContent = 'Ouverture…';
+    const p = await fetch(project); if (!p.ok) throw new Error(`${project} : ${p.status}`);
+    await open(await p.blob());
+    say(`Projet enregistré sur ce PC : proto/${project}`);
+  } finally { box.hidden = true; $('empty').hidden = !!S.project; }
+}
 for (const id of ['file', 'file2']) $(id).onchange = e => openFile(e.target.files[0]);
 // drop a project anywhere on the page
 ondragover = e => { e.preventDefault(); document.body.classList.add('dragging'); };
