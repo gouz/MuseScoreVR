@@ -13,7 +13,7 @@
 <h1>MuseScoreVR</h1>
 <p id="status">En attente d'un morceau envoyé depuis le configurateur…</p>
 <p><small>Ou ouvrir un projet présent sur le casque :</small> <input id="file" type="file" accept=".zip,application/zip"></p>
-<small>Dans le casque, avec les mains ou les manettes : viser + pincer (ou gâchette) un musicien = écouter depuis sa place, le podium = chef · panneau à votre droite, à toucher du doigt ou viser + pincer = lecture / pause, stop, ±10 s, barre de temps (aussi pilotable depuis MuseScore).</small>
+<small>Dans le casque, avec les mains ou les manettes : viser + pincer (ou gâchette) un musicien = écouter depuis sa place, le podium = chef · panneau à votre droite, à toucher du doigt ou viser + pincer = lecture / pause, stop, ±10 s, quitter la VR (✕), barre de temps (aussi pilotable depuis MuseScore).</small>
 <script type="importmap">{ "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
@@ -82,7 +82,7 @@ function teleport(seat) {
 }
 
 // transport panel at the listener's right hand; a child of the rig, so it follows them from seat to seat.
-// Top row: stop, -10 s, play/pause, +10 s; bottom: time bar (trigger on it = go there)
+// Top row: stop, -10 s, play/pause, +10 s, leave VR; bottom: time bar (trigger on it = go there)
 const pc = document.createElement('canvas'); pc.width = 512; pc.height = 192;
 const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.15), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(pc), transparent: true }));
 panel.position.set(0.32, 0.95, -0.38); panel.rotation.set(-0.7, -0.6, 0, 'YXZ'); rig.add(panel); // tilted towards the listener
@@ -93,14 +93,14 @@ function drawPanel() {
   const g = pc.getContext('2d'), mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   g.clearRect(0, 0, 512, 192); g.fillStyle = 'rgba(25,28,34,0.92)'; g.beginPath(); g.roundRect(0, 0, 512, 192, 24); g.fill();
   g.fillStyle = '#e4e6eb'; g.font = '56px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  ['■', '−10', S.playing ? '❚❚' : '▶', '+10'].forEach((b, i) => { g.font = i % 2 ? '40px system-ui' : '56px system-ui'; g.fillText(b, 64 + i * 128, 62); });
+  ['■', '−10', S.playing ? '❚❚' : '▶', '+10', '✕'].forEach((b, i) => { g.font = i % 2 ? '36px system-ui' : '50px system-ui'; g.fillStyle = i === 4 ? '#ff7b72' : '#e4e6eb'; g.fillText(b, 51 + i * 102.4, 62); });
   g.fillStyle = '#2a2e37'; g.fillRect(24, 132, 464, 12); g.fillStyle = '#4f8cff'; g.fillRect(24, 132, 464 * Math.min(1, t / (S.duration || 1)), 12);
   g.fillStyle = '#8b909c'; g.font = '26px system-ui'; g.fillText(`${mmss(t)} / ${mmss(S.duration)}`, 256, 172);
   panel.material.map.needsUpdate = true;
 }
 function pressPanel({ x, y }) { // uv: (0,0) bottom left
   if (y < 0.33) return seek(Math.max(0, Math.min(1, (x * 512 - 24) / 464)) * S.duration);
-  [stop, () => seek(Math.max(0, now() - 10)), () => S.playing ? pause() : play(), () => seek(Math.min(S.duration, now() + 10))][Math.min(3, Math.floor(x * 4))]();
+  [stop, () => seek(Math.max(0, now() - 10)), () => S.playing ? pause() : play(), () => seek(Math.min(S.duration, now() + 10)), () => renderer.xr.getSession()?.end()][Math.min(4, Math.floor(x * 5))]();
 }
 
 // hands or controllers: pinch / trigger on a cube = sit there, on the podium = conductor, on the panel = transport; grip = play/pause
