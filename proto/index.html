@@ -12,7 +12,7 @@
 <h1>MuseScoreVR</h1>
 <p id="status">En attente d'un morceau envoyé depuis le configurateur…</p>
 <p><small>Ou ouvrir un projet présent sur le casque :</small> <input id="file" type="file" accept=".zip,application/zip"></p>
-<small>Dans le casque : gâchette sur un musicien = écouter depuis sa place · gâchette sur le podium = chef · poignée = lecture / pause.</small>
+<small>Dans le casque : gâchette sur un musicien = écouter depuis sa place · gâchette sur le podium = chef · poignée = lecture / pause (aussi pilotable depuis le configurateur).</small>
 <script type="importmap">{ "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
@@ -21,7 +21,7 @@
 // Headset player: renders a project prepared in config.html; nothing about the orchestra is edited here.
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { S, ctx, play, pause, meter, sitAt, setHead, placeAll, facing, seatName, openProject, projectFromUrl } from './engine.js';
+import { S, ctx, play, pause, stop, meter, sitAt, setHead, placeAll, facing, seatName, openProject, projectFromUrl } from './engine.js';
 const status = document.getElementById('status'), file = document.getElementById('file');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -106,7 +106,9 @@ projectFromUrl().then(b => b && open(b)).catch(fail);
 // the configurator pushes projects through the Bun server; reconnect if the PC goes away
 (function listen() {
   const ws = new WebSocket(`wss://${location.host}/api/events`);
-  ws.onmessage = async () => {
+  ws.onmessage = async e => {
+    const { cmd } = JSON.parse(e.data); // remote transport from the configurator
+    if (cmd) return S.project && { play, pause, stop }[cmd]();
     status.textContent = 'Réception du morceau…';
     try {
       const r = await fetch('/api/project');

@@ -40,6 +40,7 @@ bun run serve
   Le casque attend qu'un morceau lui soit envoyé.
 - **Sur le PC** : `https://localhost:8443/config.html`, ouvrir le `.zip`, régler, puis **« Envoyer au casque »**.
   Le Quest charge le morceau tout seul, même déjà en VR ; « Enregistrer le projet » garde la configuration dans un fichier.
+  Les boutons « Casque : ▶︎ ❚❚ ■ » lancent, mettent en pause ou arrêtent la lecture dans le casque.
 - Dans le casque, « Enter VR ».
   Gâchette sur un musicien : s'asseoir à sa place · gâchette sur le podium : revenir au chef · poignée : lecture / pause.
 

@@ -4,6 +4,7 @@
 // Needs .cert/cert.pem and .cert/key.pem (self-signed, see README).
 //   POST /api/project   configurator sends a project zip; every connected headset is told to load it
 //   GET  /api/project   the last project sent
+//   POST /api/control   {cmd: play|pause|stop} forwarded to every headset
 //   WS   /api/events    headsets listen here; on connect they get the current project, if any
 import { resolve, sep } from 'node:path';
 
@@ -21,6 +22,12 @@ const server = Bun.serve({
     if (path === '/api/project' && req.method === 'POST') {
       current = await req.blob(); version++;
       server.publish('headsets', JSON.stringify({ project: version }));
+      return Response.json({ headsets: server.subscriberCount('headsets') });
+    }
+    if (path === '/api/control' && req.method === 'POST') {
+      const { cmd } = await req.json().catch(() => ({}));
+      if (!['play', 'pause', 'stop'].includes(cmd)) return new Response('Commande inconnue', { status: 400 });
+      server.publish('headsets', JSON.stringify({ cmd }));
       return Response.json({ headsets: server.subscriberCount('headsets') });
     }
     if (path === '/api/project') return current ? new Response(current, { headers: { 'content-type': 'application/zip' } }) : new Response('Aucun projet', { status: 404 });

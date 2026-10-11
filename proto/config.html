@@ -22,7 +22,8 @@
   <fieldset><legend>Projet</legend>
     <input id="file" type="file" accept=".zip,application/zip">
     <button id="save" disabled>Enregistrer le projet</button>
-    <button id="send" disabled>Envoyer au casque</button>
+    <button id="send" disabled>Envoyer au casque</button><br>
+    Casque : <button data-cmd="play">▶︎</button><button data-cmd="pause">❚❚</button><button data-cmd="stop">■</button>
   </fieldset>
   <p id="status">Ouvrez un projet (.zip créé par « bun run stems »).</p>
   <fieldset><legend>Écoute</legend>
@@ -148,6 +149,13 @@ send.onclick = async () => {
     status.textContent = headsets ? `Envoyé à ${headsets} casque${headsets > 1 ? 's' : ''}.` : 'Envoyé : le casque le chargera en se connectant.';
   } catch (e) { fail(e); } finally { send.disabled = false; }
 };
+document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = async () => {
+  try {
+    const r = await fetch('/api/control', { method: 'POST', body: JSON.stringify({ cmd: b.dataset.cmd }) });
+    if (!r.ok) throw new Error(`serveur : ${r.status}`);
+    if (!(await r.json()).headsets) status.textContent = 'Aucun casque connecté.';
+  } catch (e) { fail(e); }
+});
 save.onclick = async () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(await saveProject()); a.download = (S.project.title || 'projet') + '.zip'; a.click();
