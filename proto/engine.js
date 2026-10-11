@@ -1,6 +1,6 @@
-// Shared by the configurator (config.html) and the headset player (index.html):
-// project open/save, seat layout, streamed spatial audio, per-part level meters.
-import { readZip, writeZip, crc32 } from './zip.js';
+// The headset player's engine (index.html): project opening, seat layout, streamed spatial audio, per-part level meters.
+// The orchestra itself is configured in the MuseScore plugin (plugin/MuseScoreVR.qml).
+import { readZip } from './zip.js';
 import { arrange, radiation } from './layout.js';
 
 export const ctx = new AudioContext({ sampleRate: 44100 });
@@ -167,21 +167,6 @@ export async function openProject(file) {
   for (const s of S.seats) { const o = saved.get(key(s)); if (o) Object.assign(s, { x: o.x, y: o.y, moved: true }); }
   placeAll();
   return project;
-}
-export async function saveProject() { // -> Blob; audio entries are referenced from the open file, not copied in memory
-  const meta = { ...S.project, parts: S.parts.map(({ an, level, hue, ...p }) => p),
-    seats: S.seats.map(s => ({ part: s.part.id, copy: s.copy, x: +s.x.toFixed(2), y: +s.y.toFixed(2) })),
-    sections: S.sections, reverb: S.reverb, directivity: S.directivity, room: null };
-  const files = [];
-  for (const [name, e] of zip) if (name !== 'project.json' && name !== S.project.room?.file) files.push({ name, crc: e.crc, data: await e.blob() });
-  if (roomBlob) { // the room may come from the open project or a file just picked: either way, write it again
-    const ext = (S.room.match(/\.(wav|flac|ogg|mp3|m4a)$/i)?.[0] ?? '.wav').toLowerCase();
-    meta.room = { file: 'room' + ext, name: S.room };
-    files.push({ name: meta.room.file, crc: crc32(new Uint8Array(await roomBlob.arrayBuffer())), data: roomBlob });
-  }
-  const json = new TextEncoder().encode(JSON.stringify(meta, null, 2)); // after meta.room is known
-  files.push({ name: 'project.json', crc: crc32(json), data: new Blob([json]) });
-  return writeZip(files);
 }
 export const file = name => zip.get(name).blob(); // any entry of the open project (scores…)
 // ?project=projects/x.zip loads a project served next to the page

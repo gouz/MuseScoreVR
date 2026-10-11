@@ -1,6 +1,6 @@
 // Render a .mscz into a MuseScoreVR project using MuseScore's CLI (MuseSounds included).
 //
-// usage: bun tools/stems.js score.mscz project.zip   (needs MuseScore 4 with MuseSounds, and ffmpeg on PATH)
+// usage: bun tools/stems.js score.mscz project.zip   (needs MuseScore 4 with MuseSounds)
 // The project is an uncompressed zip: <partId>/<k>.flac (CHUNK-second dry mono slices, silent slices skipped)
 // plus project.json. Slices let the player decode only what is about to play instead of whole tracks.
 // Music stands: scores/full/ (conductor's score) and scores/<partId>/ (the part, when the score has generated parts):
@@ -11,13 +11,14 @@ import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { readZip, writeZip, crc32 } from '../proto/zip.js';
 import { sheet } from './sheet.js';
+import { wavToMono, encodeFlac } from './flac.js';
 
 const CHUNK = 10; // seconds per slice
 const SILENT = 30; // peak below this (16-bit, ~ -60 dBFS) = slice not written
 const RATE = 44100; // Hz, the player's AudioContext rate
-// MuseScore 4 CLI; set MSCORE if it lives elsewhere
+// MuseScore 4 CLI when run from the command line; set MSCORE if it lives elsewhere (the plugin passes its own)
 // ponytail: Linux default assumes a packaged `mscore` on PATH; AppImage/Flatpak users set MSCORE
-const MSCORE = process.env.MSCORE ?? {
+const MSCORE_DEFAULT = process.env.MSCORE ?? {
   darwin: '/Applications/MuseScore 4.app/Contents/MacOS/mscore',
   win32: 'C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe',
 }[process.platform] ?? 'mscore';
@@ -35,8 +36,10 @@ export function families(mscx) {
     .map(([, inst, fid, name]) => [inst, [fid, name, ranks.get(fid) ?? ranks.size]]));
 }
 
-// progress(message, done, total): called as parts are rendered (the CLI prints it; the server streams it)
-export async function render(src, out, progress = (msg, i, n) => console.log(`${i}/${n}`, msg)) {
+// progress(message, done, total): called as parts are rendered (the CLI prints it; the server reports it)
+// opts: { mscore: MuseScore executable, title, source: id of the score file, kept in project.json }
+export async function render(src, out, progress = (msg, i, n) => console.log(`${i}/${n}`, msg), opts = {}) {
+  const MSCORE = opts.mscore ?? MSCORE_DEFAULT;
   if (!src || !out) throw new Error('usage: bun tools/stems.js score.mscz project.zip');
   const tmp = await mkdtemp(join(tmpdir(), 'musescorevr-'));
   try {
@@ -66,15 +69,13 @@ export async function render(src, out, progress = (msg, i, n) => console.log(`${
         ? { name: n, crc: crc32(json), data: new Blob([json]) } : { name: n, crc: f.crc, data: new Blob([f.bytes]) });
       await Bun.write(join(tmp, 's.mscz'), writeZip(solo));
       await $`${MSCORE} -o ${join(tmp, 's.wav')} ${join(tmp, 's.mscz')}`.quiet();
-      // mono 16-bit raw PCM; slicing happens here, sample-exact (ffmpeg's segmenter cuts on FLAC frames)
-      const frames = new Int16Array(await $`ffmpeg -v error -i ${join(tmp, 's.wav')} -ac 1 -ar ${RATE} -f s16le -`.quiet().arrayBuffer());
+      const frames = wavToMono(new Uint8Array(await Bun.file(join(tmp, 's.wav')).arrayBuffer()), RATE); // sliced sample-exact below
       duration = frames.length / RATE;
       const chunks = [];
       for (let k = 0; k * CHUNK * RATE < frames.length; k++) {
         const slice = frames.subarray(k * CHUNK * RATE, (k + 1) * CHUNK * RATE);
         if (!slice.some(x => Math.abs(x) >= SILENT)) { chunks.push(null); continue; }
-        const flac = await $`ffmpeg -v error -f s16le -ar ${RATE} -ac 1 -i - -c:a flac -f flac - < ${new Blob([slice])}`.quiet().arrayBuffer();
-        const entry = `${pid}/${k}.flac`, bytes = new Uint8Array(flac);
+        const entry = `${pid}/${k}.flac`, bytes = encodeFlac(slice, RATE);
         project.push({ name: entry, data: new Blob([bytes]), crc: crc32(bytes) });
         chunks.push(entry);
       }
@@ -114,7 +115,7 @@ export async function render(src, out, progress = (msg, i, n) => console.log(`${
     const missing = parts.filter(p => !p.sheet).map(p => p.name);
     if (missing.length) progress(`sans partie séparée (générez les parties dans MuseScore) : ${missing.join(', ')}`, done, steps);
 
-    const meta = { version: 1, title: basename(src, '.mscz').trim(), chunk: CHUNK, duration, sheet: 'scores/full', parts };
+    const meta = { version: 1, title: opts.title ?? basename(src, '.mscz').trim(), source: opts.source, chunk: CHUNK, duration, sheet: 'scores/full', parts };
     const json = new TextEncoder().encode(JSON.stringify(meta, null, 2));
     project.push({ name: 'project.json', crc: crc32(json), data: new Blob([json]) });
     await Bun.write(out, writeZip(project)); // stored: the player slices entries out of the file

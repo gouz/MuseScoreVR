@@ -4,9 +4,12 @@
   "type": "module",
   "license": "GPL-3.0-only",
   "scripts": {
-    "stems": "bun tools/stems.js",
+    "plugin": "bun tools/build-plugin.js",
     "serve": "bun tools/serve.js",
-    "start": "bun tools/serve.js --open",
+    "stems": "bun tools/stems.js",
     "test": "bun test"
+  },
+  "dependencies": {
+    "selfsigned": "2.4.1"
   }
 }

@@ -4,3 +4,10 @@
 proto/projects/
 *.zip
 .DS_Store
+# built by `bun run plugin`
+plugin/bin/
+plugin/web/
+plugin/layout.mjs
+# the plugin's certificate and rendered projects
+plugin/data/
+node_modules/
