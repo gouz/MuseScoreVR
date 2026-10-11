@@ -2,123 +2,232 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MuseScoreVR – configurateur</title>
 <style>
-  body { margin: 0; font: 14px system-ui, sans-serif; background: #111; color: #ddd; display: flex; height: 100vh; }
-  #side { flex: none; width: 320px; padding: 12px; overflow-y: auto; border-right: 1px solid #333; }
-  canvas { flex: 1; min-width: 0; height: 100%; cursor: pointer; } /* min-width: its own width attribute must not grow the flex item */
-  fieldset { border: 1px solid #333; margin: 0 0 12px; }
-  label { display: block; margin: 4px 0; }
-  .part { display: flex; justify-content: space-between; align-items: center; }
-  .part input { width: 3em; }
-  .fam { margin: 10px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; border-left: 4px solid; padding-left: 6px; }
-  button { margin: 2px 4px 2px 0; }
-  #pos { width: 100%; }
-  small { color: #888; }
+  :root { --bg: #111317; --panel: #191c22; --line: #2a2e37; --text: #e4e6eb; --dim: #8b909c; --accent: #4f8cff; --ok: #3ecf8e; --err: #ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: grid; grid-template: auto 1fr / 300px 1fr; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; white-space: nowrap; }
+  header h1 small { color: var(--dim); font-weight: 400; margin-left: 6px; }
+  .grow { flex: 1; }
+  button, .btn { font: inherit; color: var(--text); background: #262a33; border: 1px solid var(--line); border-radius: 6px; padding: 5px 11px; cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled), .btn:hover { background: #2f3440; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: #3d7af0; }
+  button.icon { padding: 5px 9px; min-width: 32px; }
+  input[type=file] { display: none; }
+  #headset { display: flex; align-items: center; gap: 4px; padding-left: 10px; border-left: 1px solid var(--line); color: var(--dim); }
+  #headset .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 4px; }
+  #headset.on .dot { background: var(--ok); }
+  #headset.on { color: var(--text); }
+  aside { overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); padding: 4px 14px 14px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 16px 0 6px; display: flex; justify-content: space-between; }
+  .fam { margin: 12px 0 2px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .fam::before { content: ''; width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+  .part { display: flex; align-items: center; gap: 6px; padding: 2px 0 2px 16px; }
+  .part span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .part.zero span { color: var(--dim); text-decoration: line-through; }
+  .step { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .step button { border: 0; border-radius: 0; padding: 1px 8px; background: transparent; }
+  .step output { min-width: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+  details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 4px; }
+  summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); padding: 8px 0; }
+  .opt { display: block; margin: 8px 0; }
+  .opt small, .hint { display: block; color: var(--dim); font-size: 12px; }
+  .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  input[type=range] { accent-color: var(--accent); }
+  main { position: relative; display: grid; grid-template-rows: 1fr auto; min-width: 0; min-height: 0; }
+  canvas { width: 100%; height: 100%; display: block; min-width: 0; min-height: 0; } /* min-*: its own size attributes must not grow the grid item */
+  .overlay { position: absolute; pointer-events: none; font-size: 12px; color: var(--dim); }
+  #listen { top: 12px; left: 14px; color: var(--text); background: #000a; padding: 4px 10px; border-radius: 12px; }
+  #help { bottom: 64px; left: 14px; }
+  #reset { position: absolute; top: 10px; right: 14px; }
+  #transport { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); }
+  #pos { flex: 1; }
+  #time { font-variant-numeric: tabular-nums; color: var(--dim); min-width: 92px; text-align: right; }
+  #empty { position: absolute; inset: 24px 24px 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 2px dashed var(--line); border-radius: 14px; color: var(--dim); text-align: center; padding: 16px; }
+  #empty b { color: var(--text); font-size: 17px; }
+  body.dragging #empty { border-color: var(--accent); }
+  #toast { position: fixed; right: 16px; bottom: 70px; max-width: 420px; background: #262a33; border: 1px solid var(--line); border-left: 4px solid var(--accent); padding: 8px 12px; border-radius: 6px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  #toast.err { border-left-color: var(--err); }
+  code { background: #262a33; padding: 1px 5px; border-radius: 4px; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
-<div id="side">
-  <fieldset><legend>Projet</legend>
-    <input id="file" type="file" accept=".zip,application/zip">
-    <button id="save" disabled>Enregistrer le projet</button>
-    <button id="send" disabled>Envoyer au casque</button><br>
-    Casque : <button data-cmd="play">▶︎</button><button data-cmd="pause">❚❚</button><button data-cmd="stop">■</button>
-  </fieldset>
-  <p id="status">Ouvrez un projet (.zip créé par « bun run stems »).</p>
-  <fieldset><legend>Écoute</legend>
-    <button id="play" disabled>▶︎ Lecture</button><button id="stop">■ Stop</button>
-    <input id="pos" type="range" min="0" max="1" step="0.001" value="0">
-    <small id="time">0:00</small>
-  </fieldset>
-  <fieldset><legend>Rendu sonore</legend>
-    <label><input type="radio" name="mode" value="raw"> copies identiques</label>
-    <label><input type="radio" name="mode" value="decor" checked> copies décorrélées (retard, micro-désaccord, gain)</label>
-    <label><input id="dir" type="checkbox" checked> rayonnement des instruments (pavillons orientés)</label>
-    <label>Salle : <b id="roomName">synthétique</b></label>
-    <input id="room" type="file" accept="audio/*,.wav,.flac"> <button id="roomReset">synthétique</button><br>
-    <small>Réponse impulsionnelle d'une vraie salle (ex. bibliothèque OpenAIR, vérifiez sa licence). Elle est enregistrée dans le projet.</small>
-    <label>Réverbération <input id="rev" type="range" min="0" max="1" step="0.01" value="0.35"></label>
-  </fieldset>
-  <fieldset><legend>Musiciens par partie</legend><div id="parts"></div></fieldset>
-  <small>Glisser un cube = le déplacer · clic sur un cube = écouter depuis sa place · clic sur ◆ = chef.<br>
-    L'écoute ici sert à vérifier la configuration ; enregistrez puis ouvrez le projet dans le casque.</small>
-</div>
-<canvas id="c"></canvas>
+<header>
+  <h1>MuseScoreVR <small id="title">configurateur</small></h1>
+  <label class="btn" title="Ouvrir un projet .zip créé par « bun run stems »">Ouvrir…<input id="file" type="file" accept=".zip,application/zip"></label>
+  <button id="save" disabled title="Télécharger le projet avec sa configuration">Enregistrer</button>
+  <span class="grow"></span>
+  <button id="send" class="primary" disabled>Envoyer au casque</button>
+  <div id="headset" title="Lecture dans le casque">
+    <span class="dot"></span><span id="hsText">aucun casque</span>
+    <button class="icon" data-cmd="play" disabled title="Lecture dans le casque">▶︎</button><button class="icon" data-cmd="pause" disabled title="Pause dans le casque">❚❚</button><button class="icon" data-cmd="stop" disabled title="Arrêt dans le casque">■</button>
+  </div>
+</header>
+
+<aside>
+  <h2>Musiciens <span id="total"></span></h2>
+  <div id="parts"><p class="hint">Ouvrez un projet pour régler le nombre de musiciens par partie.</p></div>
+
+  <details>
+    <summary>Rendu sonore</summary>
+    <label class="opt"><input type="radio" name="mode" value="decor" checked> Pupitres naturels
+      <small>Chaque musicien d'une même partie joue légèrement différemment (retard, justesse, nuance).</small></label>
+    <label class="opt"><input type="radio" name="mode" value="raw"> Copies identiques
+      <small>Tous les musiciens d'une partie jouent exactement pareil.</small></label>
+    <label class="opt"><input id="dir" type="checkbox" checked> Rayonnement des instruments
+      <small>Un cuivre sonne plus fort dans l'axe de son pavillon.</small></label>
+    <div class="opt">Salle : <b id="roomName">synthétique</b>
+      <div class="row" style="margin-top:4px">
+        <label class="btn">Choisir une réponse impulsionnelle…<input id="room" type="file" accept="audio/*,.wav,.flac"></label>
+        <button id="roomReset">Synthétique</button>
+      </div>
+      <small>Enregistrement d'une vraie salle (ex. bibliothèque OpenAIR, vérifiez sa licence), stocké dans le projet.</small></div>
+    <label class="opt">Réverbération <input id="rev" type="range" min="0" max="1" step="0.01" value="0.35" style="width:100%"></label>
+  </details>
+</aside>
+
+<main>
+  <canvas id="c"></canvas>
+  <div id="empty">
+    <b>Déposez un projet ici</b>
+    <span>ou <label class="btn">Ouvrir…<input id="file2" type="file" accept=".zip,application/zip"></label></span>
+    <span class="hint">Un projet se crée depuis une partition MuseScore 4 : <code>bun run stems partition.mscz projet.zip</code></span>
+  </div>
+  <div id="listen" class="overlay" hidden></div>
+  <button id="reset" hidden title="Remettre chaque musicien à sa place automatique">Replacer automatiquement</button>
+  <div id="help" class="overlay" hidden>Glisser un musicien : le déplacer · Clic : écouter depuis sa place · Clic sur ◆ : revenir au chef · Espace : lecture</div>
+  <div id="transport">
+    <button id="play" class="icon" disabled title="Lecture / pause (Espace)">▶︎</button>
+    <button id="stop" class="icon" disabled title="Revenir au début">■</button>
+    <input id="pos" type="range" min="0" max="1" step="0.001" value="0" disabled>
+    <span id="time">0:00 / 0:00</span>
+  </div>
+</main>
+<div id="toast"></div>
+
 <script type="module">
 import { S, play, pause, stop, seek, restart, now, meter, setReverb, setRoom, sitAt, placeAll, layout, seatName, openProject, saveProject, projectFromUrl } from './engine.js';
 const $ = id => document.getElementById(id);
-const [status, playBtn, stopBtn, pos, time, rev, partsEl, file, save, send] = ['status', 'play', 'stop', 'pos', 'time', 'rev', 'parts', 'file', 'save', 'send'].map($);
-let PX = 40; // pixels per metre, refitted to the band on each draw except while dragging
+const [playBtn, stopBtn, pos, time, rev, partsEl, save, send] = ['play', 'stop', 'pos', 'time', 'rev', 'parts', 'save', 'send'].map($);
+let PX = 40; // canvas pixels per metre, refitted to the band on each draw except while dragging
+
+let toastTimer;
+function say(msg, err = false) { // short-lived message; errors stay until the next one
+  const t = $('toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  clearTimeout(toastTimer); if (!err) toastTimer = setTimeout(() => t.className = '', 4000);
+}
+const fail = e => say('Erreur : ' + (e.message || e), true);
 
 // --- plan ----------------------------------------------------------------
 const cv = $('c'), g2 = cv.getContext('2d');
-const toPx = (x, y) => [cv.width / 2 + x * PX, cv.height * 0.75 + y * PX];
-const toM = (px, py) => [(px - cv.width / 2) / PX, (py - cv.height * 0.75) / PX];
+const toPx = (x, y) => [cv.width / 2 + x * PX, cv.height * 0.8 + y * PX];
+const toM = (px, py) => [(px - cv.width / 2) / PX, (py - cv.height * 0.8) / PX];
+let hover = null;
 function draw() {
-  cv.width = cv.clientWidth; cv.height = cv.clientHeight;
-  if (!drag && S.seats.length) { // conductor sits at 3/4 height, band in front
-    const w = Math.max(...S.seats.map(s => Math.abs(s.x))) + 1.5, h = Math.max(...S.seats.map(s => -s.y)) + 1;
-    PX = Math.min(cv.width / 2 / w, cv.height * 0.75 / h, 120);
+  const dpr = devicePixelRatio || 1;
+  cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
+  if (!drag && S.seats.length) { // conductor low in the view, band in front
+    const w = Math.max(...S.seats.map(s => Math.abs(s.x))) + 1.5, h = Math.max(...S.seats.map(s => -s.y)) + 1.5;
+    PX = Math.min(cv.width / 2 / w, cv.height * 0.8 / h, 140 * dpr);
   }
   g2.clearRect(0, 0, cv.width, cv.height);
+  if (!S.seats.length) return;
+  const [cx, cy] = toPx(0, 0);
+  // distance rings every 2 m from the conductor
+  g2.strokeStyle = '#ffffff12'; g2.fillStyle = '#ffffff40'; g2.lineWidth = dpr; g2.font = `${10 * dpr}px system-ui`; g2.textAlign = 'left';
+  for (let r = 2; r * PX < Math.max(cv.width, cv.height); r += 2) {
+    g2.beginPath(); g2.arc(cx, cy, r * PX, Math.PI, 2 * Math.PI); g2.stroke();
+    g2.fillText(`${r} m`, cx + r * PX + 4 * dpr, cy - 4 * dpr);
+  }
+  g2.textAlign = 'center';
+  for (const p of new Set(S.seats.map(s => s.part.family ?? s.part.id))) { // family zones: one filled union per family
+    const seats = S.seats.filter(s => (s.part.family ?? s.part.id) === p);
+    g2.fillStyle = `hsl(${seats[0].part.hue} 60% 50% / .1)`; g2.beginPath();
+    for (const s of seats) { const [px, py] = toPx(s.x, s.y); g2.moveTo(px + 0.7 * PX, py); g2.arc(px, py, 0.7 * PX, 0, 2 * Math.PI); }
+    g2.fill();
+  }
   for (const s of S.seats) {
     const [px, py] = toPx(s.x, s.y);
-    const lv = s.part.level || 0, r = 9 + 3 * lv;
-    g2.fillStyle = `hsl(${s.part.hue} 60% ${s === S.listener ? 75 : 30 + 40 * lv}%)`;
-    g2.fillRect(px - r, py - r, 2 * r, 2 * r);
-    if (s === S.listener) { g2.strokeStyle = '#fff'; g2.lineWidth = 2; g2.strokeRect(px - 12, py - 12, 24, 24); }
-    g2.fillStyle = '#aaa'; g2.font = '10px system-ui'; g2.textAlign = 'center';
-    g2.fillText(seatName(s), px, py + 20);
+    const lv = s.part.level || 0, r = (10 + 4 * lv) * dpr, me = s === S.listener;
+    g2.fillStyle = `hsl(${s.part.hue} 60% ${me ? 70 : 38 + 35 * lv}%)`;
+    g2.beginPath(); g2.roundRect(px - r, py - r, 2 * r, 2 * r, 3 * dpr); g2.fill();
+    if (me || s === hover) { g2.strokeStyle = '#fff'; g2.lineWidth = 2 * dpr; g2.beginPath(); g2.roundRect(px - 15 * dpr, py - 15 * dpr, 30 * dpr, 30 * dpr, 4 * dpr); g2.stroke(); }
+    g2.fillStyle = me || s === hover ? '#fff' : '#a9aebb'; g2.font = `${11 * dpr}px system-ui`;
+    g2.fillText(seatName(s), px, py + 27 * dpr);
   }
-  const [cx, cy] = toPx(0, 0);
-  g2.fillStyle = S.listener ? '#888' : '#fff';
-  g2.beginPath(); g2.moveTo(cx, cy - 10); g2.lineTo(cx + 10, cy); g2.lineTo(cx, cy + 10); g2.lineTo(cx - 10, cy); g2.fill();
-  g2.fillText('chef', cx, cy + 24);
+  g2.fillStyle = !S.listener || hover === 'chef' ? '#fff' : '#888';
+  const d = 11 * dpr; g2.beginPath(); g2.moveTo(cx, cy - d); g2.lineTo(cx + d, cy); g2.lineTo(cx, cy + d); g2.lineTo(cx - d, cy); g2.fill();
+  g2.font = `${11 * dpr}px system-ui`; g2.fillText('chef', cx, cy + 27 * dpr);
 }
-let drag = null, dragged = false;
-cv.onpointerdown = e => {
-  const [mx, my] = toM(e.offsetX, e.offsetY);
-  drag = S.seats.find(s => Math.hypot(s.x - mx, s.y - my) < 0.4) || (Math.hypot(mx, my) < 0.4 ? 'chef' : null);
-  dragged = false;
+const pointer = e => toM(e.offsetX * devicePixelRatio, e.offsetY * devicePixelRatio);
+const at = e => { // seat (or 'chef') under the pointer
+  const [mx, my] = pointer(e), grab = 16 * devicePixelRatio / PX;
+  return S.seats.find(s => Math.hypot(s.x - mx, s.y - my) < grab) || (Math.hypot(mx, my) < grab ? 'chef' : null);
 };
+let drag = null, dragged = false;
+cv.onpointerdown = e => { drag = at(e); dragged = false; if (drag) cv.setPointerCapture(e.pointerId); };
 cv.onpointermove = e => {
-  if (!drag || drag === 'chef' || !(e.buttons & 1)) return;
-  [drag.x, drag.y] = toM(e.offsetX, e.offsetY); drag.moved = dragged = true; placeAll(); draw();
+  if (drag && drag !== 'chef' && e.buttons & 1) {
+    [drag.x, drag.y] = pointer(e); drag.moved = dragged = true;
+    cv.style.cursor = 'grabbing'; placeAll(); draw(); return;
+  }
+  const h = at(e); cv.style.cursor = h ? (h === 'chef' ? 'pointer' : 'grab') : '';
+  if (h !== hover) { hover = h; draw(); }
 };
 cv.onpointerup = () => {
-  if (drag && !dragged) { sitAt(drag === 'chef' ? null : drag); draw(); }
-  drag = null;
+  if (drag && !dragged) { sitAt(drag === 'chef' ? null : drag); showListen(); }
+  if (dragged) refresh();
+  drag = null; cv.style.cursor = ''; draw();
 };
+cv.onpointerleave = () => { if (hover) { hover = null; draw(); } };
 onresize = draw;
 requestAnimationFrame(function tick() { // cubes follow the music
   requestAnimationFrame(tick);
   if (S.parts.some(p => p.an || p.level > 0.01)) { meter(); draw(); }
 });
+const showListen = () => { $('listen').textContent = '🎧 Écoute depuis : ' + (S.listener ? seatName(S.listener) : 'le chef'); };
+function refresh() { // what depends on the seats
+  $('reset').hidden = !S.seats.some(s => s.moved);
+  $('total').textContent = S.seats.length + (S.seats.length > 1 ? ' musiciens' : ' musicien');
+}
+const reseat = () => { layout(); placeAll(); restart(); refresh(); showListen(); draw(); };
+$('reset').onclick = () => { S.seats.forEach(s => s.moved = false); reseat(); };
 
-// --- controls ------------------------------------------------------------
-playBtn.onclick = () => S.playing ? pause() : play();
+// --- transport -----------------------------------------------------------
+const toggle = () => S.playing ? pause() : play();
+playBtn.onclick = toggle;
 stopBtn.onclick = stop;
 pos.oninput = () => seek(pos.value * S.duration);
+onkeydown = e => { if (e.code === 'Space' && S.project && !e.target.matches('input, button, summary, label')) { e.preventDefault(); toggle(); } };
+const clock = t => `${t / 60 | 0}:${String(t % 60 | 0).padStart(2, '0')}`;
+setInterval(() => {
+  const t = Math.min(now(), S.duration);
+  playBtn.textContent = S.playing ? '❚❚' : '▶︎';
+  if (document.activeElement !== pos) pos.value = S.duration ? t / S.duration : 0;
+  time.textContent = `${clock(t)} / ${clock(S.duration)}`;
+}, 250);
+
+// --- sound options -------------------------------------------------------
 document.querySelectorAll('[name=mode]').forEach(r => r.onchange = () => { S.sections = r.value; restart(); });
 rev.oninput = () => setReverb(+rev.value);
 const showRoom = () => $('roomName').textContent = S.room ?? 'synthétique';
 $('room').onchange = e => e.target.files[0] && setRoom(e.target.files[0], e.target.files[0].name).then(showRoom).catch(fail);
 $('roomReset').onclick = () => setRoom(null).then(showRoom);
 $('dir').onchange = e => { S.directivity = e.target.checked; placeAll(); };
-const clock = t => `${t / 60 | 0}:${String(t % 60 | 0).padStart(2, '0')}`;
-setInterval(() => {
-  const t = Math.min(now(), S.duration);
-  playBtn.textContent = S.playing ? '❚❚ Pause' : '▶︎ Lecture';
-  if (document.activeElement !== pos) pos.value = S.duration ? t / S.duration : 0;
-  time.textContent = `${clock(t)} / ${clock(S.duration)}`;
-}, 250);
 
 // --- project -------------------------------------------------------------
 async function open(blob) {
-  playBtn.disabled = save.disabled = send.disabled = true; status.textContent = 'Ouverture…';
+  say('Ouverture…');
   const project = await openProject(blob);
   document.title = project.title + ' – configurateur MuseScoreVR';
+  $('title').textContent = project.title;
   document.querySelector(`[name=mode][value=${S.sections}]`).checked = true;
   rev.value = S.reverb; $('dir').checked = S.directivity; showRoom();
   // grouped by family, families in the score's order (same order as the seats)
@@ -128,41 +237,65 @@ async function open(blob) {
     if (p.family !== fam) {
       fam = p.family;
       const h = document.createElement('div'); h.className = 'fam'; h.textContent = p.familyName ?? p.family ?? '';
-      h.style.borderColor = h.style.color = `hsl(${p.hue} 60% 60%)`; els.push(h);
+      h.style.color = `hsl(${p.hue} 60% 62%)`; els.push(h);
     }
-    const row = document.createElement('label'); row.className = 'part';
-    const name = document.createElement('span'); name.textContent = p.name; // project files come from anyone: no innerHTML
-    const n = document.createElement('input'); Object.assign(n, { type: 'number', min: 0, max: 8, value: p.count });
-    n.oninput = () => { p.count = +n.value; layout(); restart(); draw(); };
-    row.append(name, n); return [...els, row];
+    const row = document.createElement('div'); row.className = 'part';
+    const name = document.createElement('span'); name.textContent = name.title = p.name; // project files come from anyone: no innerHTML
+    const out = document.createElement('output');
+    const btn = (txt, d, title) => Object.assign(document.createElement('button'), { textContent: txt, title, onclick: () => { set(p.count + d); reseat(); } });
+    const minus = btn('−', -1, 'Un musicien de moins'), plus = btn('+', 1, 'Un musicien de plus');
+    const set = n => {
+      p.count = Math.max(0, Math.min(8, n)); out.value = p.count; row.classList.toggle('zero', !p.count);
+      minus.disabled = !p.count; plus.disabled = p.count >= 8;
+    };
+    const step = document.createElement('div'); step.className = 'step'; step.append(minus, out, plus); set(p.count);
+    row.append(name, step); return [...els, row];
   }));
-  draw();
-  status.textContent = `${project.title} · ${S.parts.length} parties`; playBtn.disabled = save.disabled = send.disabled = false;
+  for (const el of [playBtn, stopBtn, pos, save, send]) el.disabled = false;
+  $('listen').hidden = $('help').hidden = false; $('empty').hidden = true;
+  showListen(); refresh(); draw();
+  say(`${project.title} ouvert · ${S.parts.length} parties`);
 }
-// the Bun server relays the project to every headset listening (tools/serve.js)
+const openFile = f => f && open(f).catch(fail);
+for (const id of ['file', 'file2']) $(id).onchange = e => openFile(e.target.files[0]);
+// drop a project anywhere on the page
+ondragover = e => { e.preventDefault(); document.body.classList.add('dragging'); };
+ondragleave = e => { if (!e.relatedTarget) document.body.classList.remove('dragging'); };
+ondrop = e => { e.preventDefault(); document.body.classList.remove('dragging'); openFile(e.dataTransfer.files[0]); };
+
+save.onclick = async () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await saveProject()); a.download = (S.project.title || 'projet') + '.zip'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+};
+
+// --- headset: the Bun server relays projects and commands (tools/serve.js) ---
 send.onclick = async () => {
-  send.disabled = true; status.textContent = 'Envoi au casque…';
+  send.disabled = true; say('Envoi au casque…');
   try {
     const r = await fetch('/api/project', { method: 'POST', body: await saveProject() });
     if (!r.ok) throw new Error(`serveur : ${r.status}`);
     const { headsets } = await r.json();
-    status.textContent = headsets ? `Envoyé à ${headsets} casque${headsets > 1 ? 's' : ''}.` : 'Envoyé : le casque le chargera en se connectant.';
+    say(headsets ? `Envoyé à ${headsets} casque${headsets > 1 ? 's' : ''}.` : 'Envoyé : le casque le chargera en se connectant.');
   } catch (e) { fail(e); } finally { send.disabled = false; }
 };
 document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = async () => {
   try {
     const r = await fetch('/api/control', { method: 'POST', body: JSON.stringify({ cmd: b.dataset.cmd }) });
     if (!r.ok) throw new Error(`serveur : ${r.status}`);
-    if (!(await r.json()).headsets) status.textContent = 'Aucun casque connecté.';
   } catch (e) { fail(e); }
 });
-save.onclick = async () => {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(await saveProject()); a.download = (S.project.title || 'projet') + '.zip'; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-};
-const fail = e => status.textContent = 'Erreur : ' + (e.message || e);
-file.onchange = () => file.files[0] && open(file.files[0]).catch(fail);
+(function listen() { // live count of connected headsets
+  const ws = new WebSocket(`wss://${location.host}/api/events?config`);
+  ws.onmessage = e => {
+    const n = JSON.parse(e.data).headsets ?? 0;
+    $('headset').classList.toggle('on', n > 0);
+    $('hsText').textContent = n ? `${n} casque${n > 1 ? 's' : ''} connecté${n > 1 ? 's' : ''}` : 'aucun casque';
+    document.querySelectorAll('[data-cmd]').forEach(b => b.disabled = !n);
+  };
+  ws.onclose = () => { $('hsText').textContent = 'serveur injoignable'; $('headset').classList.remove('on'); setTimeout(listen, 2000); };
+})();
+
 projectFromUrl().then(b => b && open(b)).catch(fail);
 </script>
 </body>

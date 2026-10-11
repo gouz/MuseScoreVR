@@ -6,6 +6,7 @@
 //   GET  /api/project   the last project sent
 //   POST /api/control   {cmd: play|pause|stop} forwarded to every headset
 //   WS   /api/events    headsets listen here; on connect they get the current project, if any
+//   WS   /api/events?config   configurators listen here for { headsets: n }, the number of headsets connected
 import { resolve, sep } from 'node:path';
 
 const root = resolve(import.meta.dir, '../proto'), cert = resolve(import.meta.dir, '../.cert');
@@ -18,7 +19,7 @@ const server = Bun.serve({
   tls: { cert: Bun.file(`${cert}/cert.pem`), key: Bun.file(`${cert}/key.pem`) },
   async fetch(req, server) {
     const path = decodeURIComponent(new URL(req.url).pathname);
-    if (path === '/api/events') return server.upgrade(req) ? undefined : new Response('WebSocket attendu', { status: 400 });
+    if (path === '/api/events') return server.upgrade(req, { data: { config: new URL(req.url).searchParams.has('config') } }) ? undefined : new Response('WebSocket attendu', { status: 400 });
     if (path === '/api/project' && req.method === 'POST') {
       current = await req.blob(); version++;
       server.publish('headsets', JSON.stringify({ project: version }));
@@ -39,12 +40,15 @@ const server = Bun.serve({
   },
   websocket: {
     open(ws) {
-      ws.subscribe('headsets');
+      if (ws.data.config) return ws.subscribe('configs'), ws.send(headsets());
+      ws.subscribe('headsets'); server.publish('configs', headsets());
       if (current) ws.send(JSON.stringify({ project: version }));
     },
+    close(ws) { if (!ws.data.config) setTimeout(() => server.publish('configs', headsets())); }, // once it has left the topic
     message() {},
   },
 });
+const headsets = () => JSON.stringify({ headsets: server.subscriberCount('headsets') });
 console.log(`https://0.0.0.0:${server.port}`);
 if (process.argv.includes('--open')) { // configurator in this PC's browser
   const url = `https://localhost:${server.port}/config.html`;
