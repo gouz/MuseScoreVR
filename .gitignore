@@ -8,6 +8,7 @@ proto/projects/
 plugin/bin/
 plugin/web/
 plugin/layout.mjs
+plugin/i18n.mjs
 # the plugin's certificate and rendered projects
 plugin/data/
 node_modules/

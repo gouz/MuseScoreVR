@@ -69,7 +69,7 @@ bun run plugin          # for macOS (universal binary), Windows and Linux
 bun run plugin --release 1.2.0   # + dist/MuseScoreVR-1.2.0-<os>.zip, like a release
 # while developing, a real folder whose contents are linked (MuseScore doesn't follow a linked folder):
 mkdir -p ~/Documents/MuseScore4/Plugins/MuseScoreVR
-for f in MuseScoreVR.qml layout.mjs logo.png bin web; do ln -sfn "$PWD/plugin/$f" ~/Documents/MuseScore4/Plugins/MuseScoreVR/; done
+for f in MuseScoreVR.qml layout.mjs i18n.mjs logo.png bin web; do ln -sfn "$PWD/plugin/$f" ~/Documents/MuseScore4/Plugins/MuseScoreVR/; done
 bun run serve           # the server from the sources (the plugin uses it if it is already running)
 bun run stems score.mscz project.zip   # rendering only, from the command line
 ```
@@ -114,6 +114,7 @@ proto/index.html      VR player (headset)
 proto/engine.js       project opening, streamed spatial audio, levels, volume
 proto/stands.js       music stands: score open like a book, notes lit while they sound
 proto/layout.js       seating presets, families as blocks, instrument radiation (also used by the plugin)
+proto/i18n.js         interface strings: en, fr, de, es, it, pt, nl, pl, ru, ja, zh, ko (also used by the plugin and the server)
 proto/zip.js          zip: uncompressed writing, uncompressed and deflate reading (.mscz)
 ```
 

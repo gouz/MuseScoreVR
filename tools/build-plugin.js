@@ -10,7 +10,7 @@ import { mkdir, rm, copyFile, cp } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const repo = resolve(import.meta.dir, '..'), out = join(repo, 'plugin');
-const WEB = ['index.html', 'engine.js', 'stands.js', 'zip.js', 'layout.js']; // the headset page and what it imports
+const WEB = ['index.html', 'engine.js', 'stands.js', 'zip.js', 'layout.js', 'i18n.js']; // the headset page and what it imports
 const here = { darwin: 'macos', win32: 'windows', linux: 'linux' }[process.platform];
 const targets = { // file name in bin/ (the plugin picks it by platform) -> Bun targets
   'musescorevr-macos': ['bun-darwin-arm64', 'bun-darwin-x64'], // merged into one universal binary when lipo is there
@@ -21,7 +21,7 @@ const targets = { // file name in bin/ (the plugin picks it by platform) -> Bun 
 await rm(join(out, 'bin'), { recursive: true, force: true }); await rm(join(out, 'web'), { recursive: true, force: true });
 await mkdir(join(out, 'bin'), { recursive: true }); await mkdir(join(out, 'web'), { recursive: true });
 for (const f of WEB) await copyFile(join(repo, 'proto', f), join(out, 'web', f));
-await copyFile(join(repo, 'proto/layout.js'), join(out, 'layout.mjs')); // QML imports ES modules by their .mjs name
+for (const m of ['layout', 'i18n']) await copyFile(join(repo, `proto/${m}.js`), join(out, `${m}.mjs`)); // QML imports ES modules by their .mjs name
 
 for (const [name, list] of Object.entries(targets)) {
   if (process.argv.includes('--here') && !name.includes(here)) continue;
@@ -52,7 +52,7 @@ if (version) {
     await mkdir(join(dir, 'bin'), { recursive: true });
     const qml = await Bun.file(join(out, 'MuseScoreVR.qml')).text();
     await Bun.write(join(dir, 'MuseScoreVR.qml'), qml.replace(/^(\s*version: )"[^"]*"/m, `$1"${version}"`));
-    await copyFile(join(out, 'layout.mjs'), join(dir, 'layout.mjs'));
+    for (const m of ['layout.mjs', 'i18n.mjs']) await copyFile(join(out, m), join(dir, m));
     await copyFile(join(out, 'logo.png'), join(dir, 'logo.png')); // thumbnail in MuseScore's plugin list (source: logo.svg)
     await cp(join(out, 'web'), join(dir, 'web'), { recursive: true });
     await copyFile(join(out, 'bin', name), join(dir, 'bin', name));

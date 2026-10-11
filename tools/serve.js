@@ -8,7 +8,7 @@
 //     WS   /api/events     headsets listen here: { project: n } = fetch it, { cmd } = play|pause|stop
 //   This PC only, HTTP (Qt refuses self-signed certificates), for the plugin:
 //     GET  /api/status     { headsets, urls, job, project }   job: render progress { title, tasks, error }; project: the one being configured
-//     POST /api/render     { path } or { names }   render a .mscz into <data>/projects/, or reuse the last render of the same file;
+//     POST /api/render     { path } or { names }, lang   render a .mscz into <data>/projects/, or reuse the last render of the same file;
 //                          names: the open score's names, looked up in MuseScore's recent files (a plugin can't save a .mscz)
 //     POST /api/send       { parts: [{ id, count }], seats, preset, sections, reverb, directivity }   save, send to the headsets
 //     POST /api/control    { cmd }
@@ -18,6 +18,7 @@ import { networkInterfaces, homedir } from 'node:os';
 import selfsigned from 'selfsigned';
 import { render } from './stems.js';
 import { readZip, writeZip, crc32 } from '../proto/zip.js';
+import { t } from '../proto/i18n.js';
 
 const arg = name => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
 const plugin = arg('--data') !== undefined, repo = resolve(import.meta.dir, '..');
@@ -36,6 +37,7 @@ if (!(await Bun.file(join(certs, 'cert.pem')).exists())) {
 let current = null, version = 0; // the project the headsets get
 let job = null; // render in progress: { title, tasks, error }
 let open = null; // { file, meta }: the rendered project being configured in the plugin
+let lang = 'en'; // the plugin's, sent with each render
 
 const lan = Bun.serve({
   port: 8443,
@@ -79,7 +81,7 @@ async function startRender(src, title) {
   if (meta?.source === source) { open = { file: out, meta }; job = null; return; }
   await mkdir(projects, { recursive: true });
   open = null; job = { title, tasks: [] };
-  render(src, out, tasks => { job.tasks = tasks; }, { title, source, mscore: arg('--mscore') })
+  render(src, out, tasks => { job.tasks = tasks; }, { title, source, mscore: arg('--mscore'), lang })
     .then(async () => { open = { file: out, meta: await readMeta(out) }; job = null; })
     .catch(e => { job.error = e.message; });
 }
@@ -109,14 +111,15 @@ Bun.serve({
       if (path === '/api/status') return Response.json({ headsets: headsets(), urls: ips.map(ip => `https://${ip}:${lan.port}/`), job,
         project: open && { ...open.meta, parts: open.meta.parts.map(({ chunks, ...p }) => p) } });
       if (path === '/api/render' && req.method === 'POST') {
-        if (job && !job.error) return new Response('Un rendu est déjà en cours', { status: 409 });
-        const { path, names = [], title } = await body();
+        const { path, names = [], title, lang: l } = await body();
+        if (l) lang = l;
+        if (job && !job.error) return new Response(t(lang, 'busy'), { status: 409 });
         const src = path ?? await findScore(names);
-        if (!src || !(await Bun.file(src).exists())) return new Response('Partition introuvable', { status: 400 });
+        if (!src || !(await Bun.file(src).exists())) return new Response(t(lang, 'notFound'), { status: 400 });
         await startRender(src, title || basename(src, '.mscz')); return Response.json({ ok: true });
       }
       if (path === '/api/send' && req.method === 'POST') {
-        if (!open) return new Response('Aucun projet', { status: 409 });
+        if (!open) return new Response(t(lang, 'noProject'), { status: 409 });
         await send(await body()); return Response.json({ headsets: headsets() });
       }
       if (path === '/api/control' && req.method === 'POST') {

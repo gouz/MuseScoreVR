@@ -12,6 +12,7 @@ import { join, basename } from 'node:path';
 import { readZip, writeZip, crc32 } from '../proto/zip.js';
 import { sheet } from './sheet.js';
 import { wavToMono, encodeFlac } from './flac.js';
+import { t } from '../proto/i18n.js';
 
 const CHUNK = 10; // seconds per slice
 const SILENT = 30; // peak below this (16-bit, ~ -60 dBFS) = slice not written
@@ -40,9 +41,9 @@ export function families(mscx) {
 
 // progress(tasks): called whenever a task moves (the CLI prints it; the server reports it).
 //   tasks: [{ name, step, value }], one per part then the music stands; value 0..1, or -1 while MuseScore works (no way to know how far)
-// opts: { mscore: MuseScore executable, title, source: id of the score file, kept in project.json }
+// opts: { mscore: MuseScore executable, title, source: id of the score file, kept in project.json, lang: of the messages }
 export async function render(src, out, progress = tasks => console.log(tasks.map(t => `${t.name}: ${t.step}`).join(' · ')), opts = {}) {
-  const MSCORE = opts.mscore ?? MSCORE_DEFAULT;
+  const MSCORE = opts.mscore ?? MSCORE_DEFAULT, tr = (key, ...a) => t(opts.lang ?? process.env.LANG, key, ...a);
   if (!src || !out) throw new Error('usage: bun tools/stems.js score.mscz project.zip');
   const tmp = await mkdtemp(join(tmpdir(), 'musescorevr-'));
   try {
@@ -55,12 +56,12 @@ export async function render(src, out, progress = tasks => console.log(tasks.map
     // per-part mixer state only exists once MuseScore 4 has saved the score; soloing relies on it
     const tracks = new Map((files.has('audiosettings.json') ? JSON.parse(text('audiosettings.json')).tracks : []).map(t => [t.partId, t]));
     if (!names.size || ![...names.keys()].every(pid => tracks.has(pid))) // MuseScore 3 parts have no id at all
-      throw new Error(`${basename(src)} n'a pas été enregistrée avec MuseScore 4 (partition MuseScore 3 ?) : ouvrez-la dans MuseScore 4, enregistrez-la, puis relancez.`);
+      throw new Error(tr('notMS4', basename(src)));
     const project = [], parts = [];
     let duration = 0;
 
-    const tasks = [...names.values()].map(name => ({ name, step: 'en attente', value: 0 }));
-    const stands = { name: 'Partitions des pupitres', step: 'en attente', value: 0 };
+    const tasks = [...names.values()].map(name => ({ name, step: tr('stepWaiting'), value: 0 }));
+    const stands = { name: tr('stands'), step: tr('stepWaiting'), value: 0 };
     tasks.push(stands);
     const set = (t, step, value) => { Object.assign(t, { step, value }); progress(tasks); };
     progress(tasks);
@@ -75,13 +76,13 @@ export async function render(src, out, progress = tasks => console.log(tasks.map
       const solo = [...files].map(([n, f]) => n === 'audiosettings.json'
         ? { name: n, crc: crc32(json), data: new Blob([json]) } : { name: n, crc: f.crc, data: new Blob([f.bytes]) });
       await Bun.write(join(tmp, 's.mscz'), writeZip(solo));
-      set(tasks[i], 'rendu par MuseScore', -1);
+      set(tasks[i], tr('stepRendering'), -1);
       await $`${MSCORE} -o ${join(tmp, 's.wav')} ${join(tmp, 's.mscz')}`.quiet();
       const frames = wavToMono(new Uint8Array(await Bun.file(join(tmp, 's.wav')).arrayBuffer()), RATE); // sliced sample-exact below
       duration = frames.length / RATE;
       const chunks = [], count = Math.ceil(frames.length / (CHUNK * RATE));
       for (let k = 0; k < count; k++) {
-        if (k % 8 === 0) { set(tasks[i], 'compression', k / count); await Bun.sleep(0); } // let the server answer meanwhile
+        if (k % 8 === 0) { set(tasks[i], tr('stepCompressing'), k / count); await Bun.sleep(0); } // let the server answer meanwhile
         const slice = frames.subarray(k * CHUNK * RATE, (k + 1) * CHUNK * RATE);
         if (!slice.some(x => Math.abs(x) >= SILENT)) { chunks.push(null); continue; }
         const entry = `${pid}/${k}.flac`, bytes = encodeFlac(slice, RATE);
@@ -91,10 +92,10 @@ export async function render(src, out, progress = tasks => console.log(tasks.map
       const inst = tracks.get(pid).instrumentId;
       const [family, familyName, familyRank] = fams[inst] ?? [inst, name, Object.keys(fams).length];
       parts.push({ id: pid, name, instrument: inst, family, familyName, familyRank, count: 1, chunks });
-      set(tasks[i], 'terminé', 1);
+      set(tasks[i], tr('stepDone'), 1);
     }
 
-    set(stands, 'mise en page par MuseScore', -1);
+    set(stands, tr('stepLayout'), -1);
     // music stands: one MuseScore batch run exports every page as SVG plus segment timings, in page layout
     const paged = new Map([...files].map(([n, f]) => [n, n.endsWith('.mscx')
       ? { crc: null, bytes: new TextEncoder().encode(new TextDecoder().decode(f.bytes).replace(/\s*<layoutMode>\w+<\/layoutMode>/, '')) } : f]));
@@ -112,9 +113,9 @@ export async function render(src, out, progress = tasks => console.log(tasks.map
     }
     await Bun.write(join(tmp, 'job.json'), JSON.stringify(job));
     await $`${MSCORE} -j ${join(tmp, 'job.json')}`.quiet();
-    set(stands, 'repérage des notes', 0);
+    set(stands, tr('stepNotes'), 0);
     for (const [k, key] of [...sheets.keys()].entries()) {
-      set(stands, 'repérage des notes', k / sheets.size); await Bun.sleep(0);
+      set(stands, tr('stepNotes'), k / sheets.size); await Bun.sleep(0);
       const pages = [...new Bun.Glob(`${key}-*.svg`).scanSync(tmp)].sort((a, b) => parseInt(a.slice(key.length + 1)) - parseInt(b.slice(key.length + 1)));
       if (!pages.length) pages.push(`${key}.svg`); // single page: no number
       const svgs = await Promise.all(pages.map(p => Bun.file(join(tmp, p)).text()));
@@ -124,7 +125,7 @@ export async function render(src, out, progress = tasks => console.log(tasks.map
     }
     for (const p of parts) if (sheets.has(p.id)) p.sheet = `scores/${p.id}`;
     const missing = parts.filter(p => !p.sheet).map(p => p.name);
-    set(stands, missing.length ? `sans partie séparée : ${missing.join(', ')} (générez les parties dans MuseScore)` : 'terminé', 1);
+    set(stands, missing.length ? tr('noParts', missing.join(', ')) : tr('stepDone'), 1);
 
     const meta = { version: 1, title: opts.title ?? basename(src, '.mscz').trim(), source: opts.source, chunk: CHUNK, duration, sheet: 'scores/full', parts };
     const json = new TextEncoder().encode(JSON.stringify(meta, null, 2));

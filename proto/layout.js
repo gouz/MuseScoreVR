@@ -3,27 +3,27 @@
 const SEAT = 1.1, ROW = 1.2, GAP = 0.6; // metres: chair to chair, row to row, between blocks
 const R0 = 2.5, SPAN = 2.44, MAXCOLS = 4; // first arc radius (m), arc opening (rad, ±70°), block width (chairs)
 
-// Seating presets: arcs front to back, each a list of groups left to right (seen from the podium).
+// Seating presets (names: preset_<id> in i18n.js): arcs front to back, each a list of groups left to right (seen from the podium).
 // A group is matched by MuseScore instrument id or family id; anything no group takes goes behind, in score order.
 const PERC = ['timpani', 'keyboard-percussion', 'pitched-metal-percussion', 'unpitched-metal-percussion', 'unpitched-wooden-percussion',
   'drums', 'batterie', 'other-percussion', 'roto-toms', 'glass-percussion', 'orff-percussion'];
 const VIOLINS = ['violin', 'violins'], VIOLAS = ['viola', 'violas'], CELLOS = ['violoncello', 'violoncellos'], BASSES = ['contrabass', 'contrabasses'];
 export const PRESETS = {
-  auto: { name: 'Ordre de la partition', tiers: [] },
-  symphonic: { name: 'Orchestre symphonique', tiers: [
+  auto: { tiers: [] },
+  symphonic: { tiers: [
     [VIOLINS, VIOLAS, CELLOS],
     [['harps', 'keyboards', 'organs'], ['flutes'], ['oboes'], BASSES],
     [['clarinets', 'saxophones'], ['bassoons']],
     [['horns', 'wagner-tubas'], ['trumpets', 'cornets'], ['trombones'], ['tubas', 'cimbassos']],
     [PERC],
   ] },
-  band: { name: "Orchestre d'harmonie", tiers: [
+  band: { tiers: [
     [['flutes'], ['oboes'], ['clarinets']],
     [['bassoons'], ['saxophones'], ['horns']],
     [['trumpets', 'cornets', 'flugelhorns'], ['trombones'], ['euphoniums', 'baritone-horns', 'alto-horns', 'saxhorns'], ['tubas', 'sousaphones'], BASSES],
     [PERC, ['keyboards', 'harps']],
   ] },
-  bigband: { name: 'Big band', tiers: [
+  bigband: { tiers: [
     [['drums', 'batterie', 'guitars', 'bass-guitars', 'keyboards', ...BASSES], ['saxophones', 'clarinets', 'flutes']],
     [['trombones']],
     [['trumpets', 'flugelhorns', 'cornets']],

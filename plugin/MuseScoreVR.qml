@@ -7,11 +7,12 @@ import QtQuick.Controls
 import QtQuick.Dialogs as Dialogs
 import MuseScore 3.0
 import "layout.mjs" as Layout
+import "i18n.mjs" as I18n
 
 MuseScore {
     id: root
     title: "MuseScoreVR"
-    description: "Écouter la partition depuis l'intérieur de l'orchestre, dans un casque de réalité virtuelle"
+    description: "Listen to the score from inside the orchestra, in a virtual reality headset"
     version: "0.1"
     thumbnailName: "logo.png"
     pluginType: "dialog"
@@ -20,6 +21,7 @@ MuseScore {
     height: 660
 
     readonly property string server: "http://127.0.0.1:8480"
+    readonly property string lang: Qt.uiLanguage || Qt.locale().name // MuseScore's language when it sets it, else the system's
     readonly property color bg: "#111317"
     readonly property color panel: "#191c22"
     readonly property color line: "#2a2e37"
@@ -43,6 +45,8 @@ MuseScore {
 
     QProcess { id: proc }            // the server; stops when the plugin window closes
 
+    function tr(key, a, b) { return I18n.t(lang, key, a, b) } // strings: proto/i18n.js
+
     // --- server --------------------------------------------------------------
     function request(method, path, body, done) {
         var x = new XMLHttpRequest();
@@ -62,14 +66,14 @@ MuseScore {
     function poll() {
         request("GET", "/api/status", undefined, function (code, text) {
             if (code !== 200) { // not running yet: start it once, then wait for it
-                if (startTries++ === 0) { message = "Démarrage de MuseScoreVR…"; startServer(); }
-                else if (startTries > 20) { message = "Impossible de démarrer le serveur MuseScoreVR (dossier bin/ du plugin)."; busy = false; poller.stop(); }
+                if (startTries++ === 0) { message = tr("starting"); startServer(); }
+                else if (startTries > 20) { message = tr("cantStart"); busy = false; poller.stop(); }
                 return;
             }
             var first = !status.urls;
             status = JSON.parse(text);
             if (first) exportScore();
-            if (status.job) { busy = !status.job.error; message = status.job.error || "Préparation de " + status.job.title; }
+            if (status.job) { busy = !status.job.error; message = status.job.error || tr("preparing", status.job.title); }
             else if (requested && status.project && (!project || project.source !== status.project.source)) openProject(status.project);
         });
     }
@@ -77,24 +81,24 @@ MuseScore {
 
     // the server reads the score's saved file (a plugin can't save a .mscz in MuseScore 4): it finds it by name in MuseScore's recent files
     function exportScore() {
-        var name = curScore.title || curScore.scoreName || "partition";
+        var name = curScore.title || curScore.scoreName || tr("score");
         try { cmd("file-save") } catch (e) { console.warn(e) } // the file on disk = the score as it is now (asks where, if never saved)
-        busy = true; requested = false; project = null; message = "Préparation de " + name + "…";
-        request("POST", "/api/render", { names: [curScore.scoreName, curScore.title], title: name }, function (code, text) {
+        busy = true; requested = false; project = null; message = tr("preparing", name);
+        request("POST", "/api/render", { names: [curScore.scoreName, curScore.title], title: name, lang: lang }, function (code, text) {
             if (code === 200) requested = true;
-            else { message = code === 400 ? "Enregistre la partition (⌘S / Ctrl+S), puis rouvre MuseScoreVR — ou choisis le fichier :" : text; busy = false; }
+            else { message = code === 400 ? tr("saveFirst") : text; busy = false; }
         });
     }
     function render(path, name) {
-        busy = true; requested = false; project = null; message = "Préparation de " + name + "…";
-        request("POST", "/api/render", { path: path, title: name }, function (code, text) {
+        busy = true; requested = false; project = null; message = tr("preparing", name);
+        request("POST", "/api/render", { path: path, title: name, lang: lang }, function (code, text) {
             if (code === 200) requested = true; else { message = text; busy = false; }
         });
     }
     Dialogs.FileDialog {
         id: pick
-        title: "Partition enregistrée avec MuseScore 4"
-        nameFilters: ["Partitions MuseScore (*.mscz)"]
+        title: root.tr("pickTitle")
+        nameFilters: [root.tr("pickFilter")]
         onAccepted: root.render(root.localPath(selectedFile), String(selectedFile).split("/").pop().replace(/\.mscz$/i, ""))
     }
 
@@ -126,15 +130,15 @@ MuseScore {
     function seatName(s) { return s.part.name + (s.part.count > 1 ? " #" + (s.copy + 1) : "") }
 
     function send() {
-        message = "Envoi au casque…";
+        message = tr("sending");
         request("POST", "/api/send", {
             parts: parts.map(function (p) { return { id: p.id, count: p.count } }),
             seats: seats.map(function (s) { return { part: s.part.id, copy: s.copy, x: +s.x.toFixed(2), y: +s.y.toFixed(2) } }),
             preset: preset, sections: sections, reverb: reverb, directivity: directivity
         }, function (code, text) {
-            if (code !== 200) { message = "Erreur : " + text; return }
+            if (code !== 200) { message = tr("error", text); return }
             var n = JSON.parse(text).headsets;
-            message = n ? "Envoyé à " + n + " casque" + (n > 1 ? "s" : "") + "." : "Enregistré : le casque le chargera en se connectant.";
+            message = n ? tr("sent", n) : tr("savedForLater");
         });
     }
     function control(cmd) { request("POST", "/api/control", { cmd: cmd }) }
@@ -185,16 +189,16 @@ MuseScore {
                 spacing: 6
                 Text { text: "MuseScoreVR"; color: root.fg; font.pixelSize: 15; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 Item { width: 12; height: 1 }
-                Btn { text: "Envoyer au casque"; primary: true; enabled2: !!root.project && !root.busy; onClicked: root.send() }
+                Btn { text: root.tr("send"); primary: true; enabled2: !!root.project && !root.busy; onClicked: root.send() }
                 Item { width: 12; height: 1 }
-                Btn { text: "▶ Lecture"; enabled2: !!root.status.headsets; onClicked: root.control("play") }
-                Btn { text: "❚❚ Pause"; enabled2: !!root.status.headsets; onClicked: root.control("pause") }
-                Btn { text: "■ Stop"; enabled2: !!root.status.headsets; onClicked: root.control("stop") }
+                Btn { text: root.tr("play"); enabled2: !!root.status.headsets; onClicked: root.control("play") }
+                Btn { text: root.tr("pause"); enabled2: !!root.status.headsets; onClicked: root.control("pause") }
+                Btn { text: root.tr("stop"); enabled2: !!root.status.headsets; onClicked: root.control("stop") }
                 Item { width: 12; height: 1 }
                 Rectangle { width: 8; height: 8; radius: 4; anchors.verticalCenter: parent.verticalCenter; color: root.status.headsets ? "#3ecf8e" : "#555" }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter; color: root.status.headsets ? root.fg : root.dim; font.pixelSize: 13
-                    text: root.status.headsets ? root.status.headsets + " casque" + (root.status.headsets > 1 ? "s connectés" : " connecté") : "aucun casque"
+                    text: root.tr("headsets", root.status.headsets || 0)
                 }
             }
             Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: root.line }
@@ -212,14 +216,14 @@ MuseScore {
                 Column {
                     id: col
                     width: parent.width; spacing: 4
-                    Text { color: root.dim; font.pixelSize: 11; font.capitalization: Font.AllUppercase; font.letterSpacing: 1; text: "Disposition" }
+                    Text { color: root.dim; font.pixelSize: 11; font.capitalization: Font.AllUppercase; font.letterSpacing: 1; text: root.tr("layout") }
                     Flow {
                         width: col.width; spacing: 6
                         Repeater {
                             model: Object.keys(Layout.PRESETS)
                             Btn {
                                 required property string modelData
-                                text: Layout.PRESETS[modelData].name
+                                text: root.tr("preset_" + modelData)
                                 primary: root.preset === modelData
                                 onClicked: root.setPreset(modelData)
                             }
@@ -228,7 +232,7 @@ MuseScore {
                     Item { width: 1; height: 10 }
                     Text {
                         color: root.dim; font.pixelSize: 11; font.capitalization: Font.AllUppercase; font.letterSpacing: 1
-                        text: "Musiciens" + (root.rev >= 0 && root.seats.length ? " · " + root.seats.length : "")
+                        text: root.tr("musicians") + (root.rev >= 0 && root.seats.length ? " · " + root.seats.length : "")
                     }
                     Repeater {
                         model: root.rev >= 0 ? root.parts : []
@@ -255,13 +259,13 @@ MuseScore {
                         }
                     }
                     Item { width: 1; height: 14 }
-                    Text { color: root.dim; font.pixelSize: 11; font.capitalization: Font.AllUppercase; font.letterSpacing: 1; text: "Rendu sonore" }
-                    RadioButton { text: "Pupitres naturels"; checked: root.sections === "decor"; onClicked: root.sections = "decor"; palette.windowText: root.fg }
-                    RadioButton { text: "Copies identiques"; checked: root.sections === "raw"; onClicked: root.sections = "raw"; palette.windowText: root.fg }
-                    CheckBox { text: "Rayonnement des instruments"; checked: root.directivity; onToggled: root.directivity = checked; palette.windowText: root.fg }
-                    Text { text: "Réverbération"; color: root.fg; font.pixelSize: 13 }
+                    Text { color: root.dim; font.pixelSize: 11; font.capitalization: Font.AllUppercase; font.letterSpacing: 1; text: root.tr("sound") }
+                    RadioButton { text: root.tr("naturalSections"); checked: root.sections === "decor"; onClicked: root.sections = "decor"; palette.windowText: root.fg }
+                    RadioButton { text: root.tr("identicalCopies"); checked: root.sections === "raw"; onClicked: root.sections = "raw"; palette.windowText: root.fg }
+                    CheckBox { text: root.tr("directivity"); checked: root.directivity; onToggled: root.directivity = checked; palette.windowText: root.fg }
+                    Text { text: root.tr("reverb"); color: root.fg; font.pixelSize: 13 }
                     Slider { width: col.width; from: 0; to: 1; value: root.reverb; onMoved: root.reverb = value }
-                    Text { width: col.width; wrapMode: Text.Wrap; color: root.dim; font.pixelSize: 11; text: "Les réglages partent avec « Envoyer au casque »." }
+                    Text { width: col.width; wrapMode: Text.Wrap; color: root.dim; font.pixelSize: 11; text: root.tr("settingsNote") }
                 }
             }
         }
@@ -314,7 +318,7 @@ MuseScore {
                     g.fillStyle = on ? "#ffffff" : "#a9aebb"; g.fillText(root.seatName(s), p[0], p[1] + 27);
                 });
                 g.fillStyle = "#ffffff"; g.beginPath(); g.moveTo(c[0], c[1] - 11); g.lineTo(c[0] + 11, c[1]); g.lineTo(c[0], c[1] + 11); g.lineTo(c[0] - 11, c[1]); g.fill();
-                g.fillText("chef", c[0], c[1] + 27);
+                g.fillText(root.tr("conductor"), c[0], c[1] + 27);
             }
             MouseArea {
                 anchors.fill: parent; hoverEnabled: true
@@ -329,13 +333,13 @@ MuseScore {
             Btn {
                 anchors { right: parent.right; top: parent.top; margins: 12 }
                 visible: root.rev >= 0 && root.seats.some(function (s) { return s.moved })
-                text: "Replacer automatiquement"
+                text: root.tr("autoPlace")
                 onClicked: { root.seats.forEach(function (s) { s.moved = false }); root.layout() }
             }
             Text {
                 anchors { left: parent.left; bottom: parent.bottom; margins: 12 }
                 visible: !!root.project; color: root.dim; font.pixelSize: 12
-                text: "Glisser un musicien pour le déplacer · le chef est au ◆"
+                text: root.tr("dragHint")
             }
             // render progress / errors
             Rectangle {
@@ -370,9 +374,9 @@ MuseScore {
                     }
                     Text {
                         width: parent.width; wrapMode: Text.Wrap; color: root.dim; font.pixelSize: 12; visible: root.busy
-                        text: "MuseScore rend chaque partie avec les MuseSounds (≈ 30 s par partie). Le résultat est gardé : la prochaine ouverture de cette partition sera immédiate."
+                        text: root.tr("renderNote")
                     }
-                    Btn { visible: !root.busy; text: "Choisir le fichier .mscz enregistré…"; onClicked: pick.open() }
+                    Btn { visible: !root.busy; text: root.tr("chooseFile"); onClicked: pick.open() }
                 }
             }
         }
@@ -386,7 +390,7 @@ MuseScore {
             TextEdit { // selectable, to copy the address
                 anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
                 readOnly: true; selectByMouse: true; color: root.fg; font.pixelSize: 13
-                text: root.status.urls && root.status.urls.length ? "Dans le navigateur du Quest : " + root.status.urls.join("  ou  ") : ""
+                text: root.status.urls && root.status.urls.length ? root.tr("questUrl", root.status.urls) : ""
             }
             Text {
                 anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
