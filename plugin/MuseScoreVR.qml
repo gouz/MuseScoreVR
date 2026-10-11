@@ -129,13 +129,22 @@ MuseScore {
     function setCount(p, n) { p.count = Math.max(0, Math.min(8, n)); layout() }
     function seatName(s) { return s.part.name + (s.part.count > 1 ? " #" + (s.copy + 1) : "") }
 
-    function send() {
-        message = tr("sending");
-        request("POST", "/api/send", {
+    function config() {
+        return {
             parts: parts.map(function (p) { return { id: p.id, count: p.count } }),
             seats: seats.map(function (s) { return { part: s.part.id, copy: s.copy, x: +s.x.toFixed(2), y: +s.y.toFixed(2) } }),
             preset: preset, sections: sections, reverb: reverb, directivity: directivity
-        }, function (code, text) {
+        }
+    }
+    // every change is saved for this score after a short pause; it comes back when the score is reopened or re-rendered
+    Timer { id: autosave; interval: 600; onTriggered: if (root.project) root.request("POST", "/api/config", root.config()) }
+    onRevChanged: autosave.restart()
+    onReverbChanged: autosave.restart()
+    onSectionsChanged: autosave.restart()
+    onDirectivityChanged: autosave.restart()
+    function send() {
+        message = tr("sending"); autosave.stop();
+        request("POST", "/api/send", config(), function (code, text) {
             if (code !== 200) { message = tr("error", text); return }
             var n = JSON.parse(text).headsets;
             message = n ? tr("sent", n) : tr("savedForLater");

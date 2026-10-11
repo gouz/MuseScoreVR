@@ -64,8 +64,10 @@ async function start() {
       lfo.connect(depth).connect(d.delayTime); lfo.start(); nodes.add(lfo);
       out = g.connect(d);
     }
-    out.connect(pan).connect(master); g.connect(revSend);
-    s.in = g; s.pan = pan; chains.push(g, pan);
+    // the part's reverb amount from MuseScore's mixer, relative to its default send (0.3)
+    const send = ctx.createGain(); send.gain.value = (s.part.reverb ?? 0.3) / 0.3;
+    out.connect(pan).connect(master); g.connect(send).connect(revSend);
+    s.in = g; s.pan = pan; chains.push(g, pan, send);
     if (s.copy === 0) { const an = ctx.createAnalyser(); an.fftSize = 1024; g.connect(an); s.part.an = an; chains.push(an); }
   }
   startAt = ctx.currentTime + 0.1; next = k0; placeAll(); pump();

@@ -29,6 +29,20 @@ const MSCORE_DEFAULT = process.env.MSCORE ?? {
 export const partNames = mscx => new Map([...mscx.matchAll(/<Part id="(\d+)">([\s\S]*?)<trackName>([^<]*)/g)]
   .filter(m => !m[2].includes('<show>0</show>')).map(m => [m[1], m[3]]));
 
+// MuseScore's mixer (audiosettings.json): the parts it lets play — the soloed ones if any, else all but the muted ones
+export function audible(settings, ids) {
+  const st = id => settings.tracks.find(t => t.partId === id)?.soloMuteState ?? {};
+  const solo = ids.filter(id => st(id).solo), play = solo.length ? solo : ids.filter(id => !st(id).mute);
+  return play.length ? play : ids; // everything muted: render it all rather than nothing
+}
+// how much of a part goes to MuseScore's reverb: its active sends to aux buses holding an active reverb, at the bus level
+export function reverbSend(settings, id) {
+  const aux = (settings.aux ?? []).map(a => Object.values(a.out?.fxChain ?? {}).some(f => f.active && /reverb/i.test(f.resourceMeta?.id ?? ''))
+    ? 10 ** ((a.out.volumeDb ?? 0) / 20) : 0);
+  const sends = settings.tracks.find(t => t.partId === id)?.out?.auxSends ?? [];
+  return +sends.reduce((sum, x, i) => sum + (x.active ? x.signalAmount * (aux[i] ?? 0) : 0), 0).toFixed(3);
+}
+
 // instrument id -> [family id, family display name, rank] from the score's <Order> block.
 // The order lists families front to back (woodwinds, brass, percussion...); families it doesn't list rank last.
 export function families(mscx) {
@@ -52,11 +66,14 @@ export async function render(src, out, progress = tasks => console.log(tasks.map
     for (const [name, e] of score) files.set(name, { crc: e.crc, bytes: new Uint8Array(await (await e.blob()).arrayBuffer()) });
     const text = name => new TextDecoder().decode(files.get(name).bytes);
     const mscx = text([...files.keys()].find(n => n.endsWith('.mscx') && !n.includes('/')));
-    const names = partNames(mscx), fams = families(mscx);
+    const all = partNames(mscx), fams = families(mscx);
     // per-part mixer state only exists once MuseScore 4 has saved the score; soloing relies on it
-    const tracks = new Map((files.has('audiosettings.json') ? JSON.parse(text('audiosettings.json')).tracks : []).map(t => [t.partId, t]));
-    if (!names.size || ![...names.keys()].every(pid => tracks.has(pid))) // MuseScore 3 parts have no id at all
+    const mixer = files.has('audiosettings.json') ? JSON.parse(text('audiosettings.json')) : { tracks: [] };
+    const tracks = new Map(mixer.tracks.map(t => [t.partId, t]));
+    if (!all.size || ![...all.keys()].every(pid => tracks.has(pid))) // MuseScore 3 parts have no id at all
       throw new Error(tr('notMS4', basename(src)));
+    // parts muted (or not soloed) in MuseScore's mixer are left out, like hidden ones; volume, effects and sounds stay in the stems
+    const names = new Map(audible(mixer, [...all.keys()]).map(id => [id, all.get(id)]));
     const project = [], parts = [];
     let duration = 0;
 
@@ -66,11 +83,12 @@ export async function render(src, out, progress = tasks => console.log(tasks.map
     const set = (t, step, value) => { Object.assign(t, { step, value }); progress(tasks); };
     progress(tasks);
     for (const [i, [pid, name]] of [...names].entries()) { // score order (top to bottom), used to break ties within a family
-      // solo this part, kill reverb sends -> dry stem
+      // solo this part, kill reverb sends -> dry stem; centred, since its chair places it (a pan would only lower the mono sum)
       const settings = JSON.parse(text('audiosettings.json'));
       for (const t of settings.tracks) {
         t.soloMuteState = { mute: t.partId !== pid, solo: t.partId === pid };
         for (const send of t.out?.auxSends ?? []) send.active = false;
+        if (t.out) t.out.balance = 0;
       }
       const json = new TextEncoder().encode(JSON.stringify(settings, null, 4));
       const solo = [...files].map(([n, f]) => n === 'audiosettings.json'
@@ -91,7 +109,7 @@ export async function render(src, out, progress = tasks => console.log(tasks.map
       }
       const inst = tracks.get(pid).instrumentId;
       const [family, familyName, familyRank] = fams[inst] ?? [inst, name, Object.keys(fams).length];
-      parts.push({ id: pid, name, instrument: inst, family, familyName, familyRank, count: 1, chunks });
+      parts.push({ id: pid, name, instrument: inst, family, familyName, familyRank, count: 1, reverb: reverbSend(mixer, pid), chunks });
       set(tasks[i], tr('stepDone'), 1);
     }
 

@@ -11,6 +11,7 @@
 //     POST /api/render     { path } or { names }, lang   render a .mscz into <data>/projects/, or reuse the last render of the same file;
 //                          names: the open score's names, looked up in MuseScore's recent files (a plugin can't save a .mscz)
 //     POST /api/send       { parts: [{ id, count }], seats, preset, sections, reverb, directivity }   save, send to the headsets
+//     POST /api/config     same body as /api/send: saved for this score (<data>/projects/<slug>.json), kept across re-renders
 //     POST /api/control    { cmd }
 import { resolve, sep, join, basename } from 'node:path';
 import { mkdir, rename } from 'node:fs/promises';
@@ -73,32 +74,48 @@ async function findScore(names) {
   }
 }
 
+// the orchestra configured for a score, saved beside its render (<slug>.json): it outlives re-renders of an edited score
+const configFile = zip => zip.replace(/\.zip$/, '.json');
+const loadConfig = async zip => applyConfig(await readMeta(zip), await Bun.file(configFile(zip)).json().catch(() => ({})));
+function applyConfig(meta, cfg) { // parts gone from the score are dropped, new ones keep their automatic count and seat
+  const counts = new Map((cfg.parts ?? []).map(p => [String(p.id), Math.max(0, Math.min(8, p.count | 0))]));
+  const has = k => cfg[k] !== undefined;
+  return { ...meta, parts: meta.parts.map(p => ({ ...p, count: counts.get(p.id) ?? p.count })),
+    seats: Array.isArray(cfg.seats) ? cfg.seats.map(s => ({ part: String(s.part), copy: s.copy | 0, x: +s.x || 0, y: +s.y || 0 })) : meta.seats,
+    preset: typeof cfg.preset === 'string' ? cfg.preset : meta.preset, sections: has('sections') ? (cfg.sections === 'raw' ? 'raw' : 'decor') : meta.sections,
+    reverb: has('reverb') ? Math.max(0, Math.min(1, +cfg.reverb || 0)) : meta.reverb, directivity: has('directivity') ? cfg.directivity !== false : meta.directivity };
+}
+async function saveConfig(cfg) { // parts left out of this render (muted in MuseScore...) keep their saved count and chairs
+  open.meta = applyConfig(open.meta, cfg);
+  const old = await Bun.file(configFile(open.file)).json().catch(() => ({})), here = new Set(open.meta.parts.map(p => p.id));
+  cfg = { ...cfg, parts: [...(cfg.parts ?? []), ...(old.parts ?? []).filter(p => !here.has(String(p.id)))],
+    seats: [...(cfg.seats ?? []), ...(old.seats ?? []).filter(s => !here.has(String(s.part)))] };
+  await Bun.write(configFile(open.file), JSON.stringify(cfg, null, 2));
+}
+
 async function startRender(src, title) {
   const out = join(projects, slug(title) + '.zip');
   // same score content -> same render (an export from MuseScore changes the zip's dates, not its entries)
   const source = Bun.hash([...await readZip(Bun.file(src))].filter(([n]) => !n.startsWith('Thumbnails/')).map(([n, e]) => n + e.crc).join()).toString(16);
   const meta = await readMeta(out).catch(() => null);
-  if (meta?.source === source) { open = { file: out, meta }; job = null; return; }
+  if (meta?.source === source) { open = { file: out, meta: await loadConfig(out) }; job = null; return; }
   await mkdir(projects, { recursive: true });
   open = null; job = { title, tasks: [] };
   render(src, out, tasks => { job.tasks = tasks; }, { title, source, mscore: arg('--mscore'), lang })
-    .then(async () => { open = { file: out, meta: await readMeta(out) }; job = null; })
+    .then(async () => { open = { file: out, meta: await loadConfig(out) }; job = null; })
     .catch(e => { job.error = e.message; });
 }
 
-async function send(cfg) { // write the configuration into the project file, then hand it to the headsets
-  const counts = new Map((cfg.parts ?? []).map(p => [String(p.id), Math.max(0, Math.min(8, p.count | 0))]));
-  const meta = { ...open.meta, parts: open.meta.parts.map(p => ({ ...p, count: counts.get(p.id) ?? p.count })),
-    seats: (cfg.seats ?? []).map(s => ({ part: String(s.part), copy: s.copy | 0, x: +s.x || 0, y: +s.y || 0 })),
-    preset: typeof cfg.preset === 'string' ? cfg.preset : 'auto', sections: cfg.sections === 'raw' ? 'raw' : 'decor', reverb: Math.max(0, Math.min(1, +cfg.reverb || 0)), directivity: cfg.directivity !== false };
+async function send(cfg) { // save the configuration, write it into the project file, then hand it to the headsets
+  await saveConfig(cfg);
   // Bun drops Bun.file() parts inside a new Blob: entries are read into memory before the file is replaced
   const files = [];
   for (const [name, e] of await readZip(Bun.file(open.file)))
     if (name !== 'project.json') files.push({ name, crc: e.crc, data: new Blob([await (await e.blob()).arrayBuffer()]) });
-  const json = new TextEncoder().encode(JSON.stringify(meta, null, 2));
+  const json = new TextEncoder().encode(JSON.stringify(open.meta, null, 2));
   files.push({ name: 'project.json', crc: crc32(json), data: new Blob([json]) });
   await Bun.write(open.file + '.tmp', writeZip(files)); await rename(open.file + '.tmp', open.file);
-  open.meta = meta; current = Bun.file(open.file); version++;
+  current = Bun.file(open.file); version++;
   lan.publish('headsets', JSON.stringify({ project: version }));
 }
 
@@ -121,6 +138,10 @@ Bun.serve({
       if (path === '/api/send' && req.method === 'POST') {
         if (!open) return new Response(t(lang, 'noProject'), { status: 409 });
         await send(await body()); return Response.json({ headsets: headsets() });
+      }
+      if (path === '/api/config' && req.method === 'POST') { // autosave from the plugin; nothing goes to the headsets
+        if (!open) return new Response(t(lang, 'noProject'), { status: 409 });
+        await saveConfig(await body()); return Response.json({ ok: true });
       }
       if (path === '/api/control' && req.method === 'POST') {
         const { cmd } = await body();
